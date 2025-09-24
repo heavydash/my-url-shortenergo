@@ -14,6 +14,7 @@ type Handler struct {
 }
 
 func NewHandler(repo *repository.MemoryRepository) *Handler {
+
 	return &Handler{repo: repo}
 }
 
