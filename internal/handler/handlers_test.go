@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"net/http/httptest"
@@ -47,26 +48,23 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			method:       "GET",
 			path:         "/invalid",
 			body:         "",
-			wantStatus:   400,
+			wantStatus:   404,
 			wantBody:     "",
 			wantLocation: "",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
 			repo := repository.NewMemoryRepository()
 			if tt.name == "valid get" {
 				repo.InitializeForTest("00000001", "https://example.com")
 			}
 			h := NewHandler(repo)
-
+			r := chi.NewRouter()
+			h.SetupRoutes(r)
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
-
 			w := httptest.NewRecorder()
-
-			h.ServeHTTP(w, req)
-
+			r.ServeHTTP(w, req)
 			assert.Equal(t, tt.wantStatus, w.Code)
 			if tt.wantBody != "" {
 				assert.Contains(t, w.Body.String(), tt.wantBody)
