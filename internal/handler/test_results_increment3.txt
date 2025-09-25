@@ -1,0 +1,12 @@
+=== RUN   TestHandler_ServeHTTP
+=== RUN   TestHandler_ServeHTTP/valid_post
+=== RUN   TestHandler_ServeHTTP/invalid_post
+=== RUN   TestHandler_ServeHTTP/valid_get
+=== RUN   TestHandler_ServeHTTP/invalid_get
+--- PASS: TestHandler_ServeHTTP (0.00s)
+    --- PASS: TestHandler_ServeHTTP/valid_post (0.00s)
+    --- PASS: TestHandler_ServeHTTP/invalid_post (0.00s)
+    --- PASS: TestHandler_ServeHTTP/valid_get (0.00s)
+    --- PASS: TestHandler_ServeHTTP/invalid_get (0.00s)
+PASS
+ok  	github.com/heavydash/my-url-shortenergo/internal/handler	1.152s
