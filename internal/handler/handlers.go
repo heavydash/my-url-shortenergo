@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"io"
 	"net/http"
 	"strings"
@@ -12,15 +13,17 @@ import (
 
 type Handler struct {
 	repo repository.URLRepository
+	cfg  *config.Config
 }
 
-func NewHandler(repo repository.URLRepository) *Handler {
-	return &Handler{repo: repo}
+func NewHandler(repo repository.URLRepository, cfg *config.Config) *Handler {
+	return &Handler{repo: repo, cfg: cfg}
 
 }
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Post("/", h.ShortenURL)
+	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
 }
 
@@ -44,9 +47,15 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte("http://localhost:8080/" + savedModel.ID))
+	w.Write([]byte(h.cfg.BaseURL + savedModel.ID))
 }
-
+func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
+	if method := r.Method; method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Write([]byte("URL Shortener Service - Use POST / to shorten and GET /{id} to redirect"))
+}
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if len(id) == 0 {

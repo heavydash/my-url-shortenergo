@@ -1,0 +1,10 @@
+=== RUN   TestHandler_ShortenURL
+=== RUN   TestHandler_ShortenURL/Valid_POST
+--- PASS: TestHandler_ShortenURL (0.00s)
+    --- PASS: TestHandler_ShortenURL/Valid_POST (0.00s)
+=== RUN   TestHandler_HomeHandler
+=== RUN   TestHandler_HomeHandler/Valid_GET
+--- PASS: TestHandler_HomeHandler (0.00s)
+    --- PASS: TestHandler_HomeHandler/Valid_GET (0.00s)
+PASS
+ok  	github.com/heavydash/my-url-shortenergo/internal/handler	0.416s

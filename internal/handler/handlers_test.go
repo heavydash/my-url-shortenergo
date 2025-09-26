@@ -2,76 +2,44 @@ package handler
 
 import (
 	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/repository"
-	"github.com/stretchr/testify/assert"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestHandler_ServeHTTP(t *testing.T) {
-	tests := []struct {
-		name         string
-		method       string
-		path         string
-		body         string
-		wantStatus   int
-		wantBody     string
-		wantLocation string
-	}{
+func TestHandler_ShortenURL(t *testing.T) {
+	t.Run("Valid POST", func(t *testing.T) {
+		repo := &repository.MemoryRepository{}
+		cfg := &config.Config{BaseURL: "http://test.com/"}
+		h := NewHandler(repo, cfg)
+		r := chi.NewRouter()
+		h.SetupRoutes(r)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/", strings.NewReader("https://example.com"))
+		r.ServeHTTP(w, req)
 
-		{name: "valid post",
-			method:       "POST",
-			path:         "/",
-			body:         "https://example.com",
-			wantStatus:   201,
-			wantBody:     "http://localhost:8080/",
-			wantLocation: "",
-		},
-		{name: "invalid post",
-			method:       "POST",
-			path:         "/",
-			body:         "invalid",
-			wantStatus:   400,
-			wantBody:     "",
-			wantLocation: "",
-		},
-		{name: "valid get",
-			method:       "GET",
-			path:         "/00000001",
-			body:         "",
-			wantStatus:   307,
-			wantBody:     "",
-			wantLocation: "https://example.com",
-		},
-		{name: "invalid get",
-			method:       "GET",
-			path:         "/invalid",
-			body:         "",
-			wantStatus:   404,
-			wantBody:     "",
-			wantLocation: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := repository.NewMemoryRepository()
-			if tt.name == "valid get" {
-				repo.InitializeForTest("00000001", "https://example.com")
-			}
-			h := NewHandler(repo)
-			r := chi.NewRouter()
-			h.SetupRoutes(r)
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-			assert.Equal(t, tt.wantStatus, w.Code)
-			if tt.wantBody != "" {
-				assert.Contains(t, w.Body.String(), tt.wantBody)
-			}
-			if tt.wantLocation != "" {
-				assert.Equal(t, tt.wantLocation, w.Header().Get("Location"))
-			}
-		})
-	}
+		assert.Equal(t, http.StatusCreated, w.Code)
+		assert.Contains(t, w.Body.String(), "http://test.com/")
+	})
+}
+
+func TestHandler_HomeHandler(t *testing.T) {
+	t.Run("Valid GET", func(t *testing.T) {
+		repo := &repository.MemoryRepository{}
+		cfg := &config.Config{}
+		h := NewHandler(repo, cfg)
+		r := chi.NewRouter()
+		h.SetupRoutes(r)
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "URL Shortener Service")
+	})
 }

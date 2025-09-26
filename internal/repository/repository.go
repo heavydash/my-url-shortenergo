@@ -11,36 +11,36 @@ type URLRepository interface {
 }
 
 type MemoryRepository struct {
-	urls    map[string]model.URLModel
+	urls    []model.URLModel
 	counter int
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		urls:    make(map[string]model.URLModel),
+		urls:    make([]model.URLModel, 0),
 		counter: 0,
 	}
 }
 
-func (mr *MemoryRepository) InitializeForTest(id string, url string) {
-	mr.urls[id] = model.URLModel{ID: id, URL: url}
-	mr.counter = 1
-}
-
-func (mr *MemoryRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
-	id := fmt.Sprintf("%08d", mr.counter)
-	mr.counter++
-	if _, exists := mr.urls[id]; exists {
-		mr.counter++
-		id = fmt.Sprintf("%08d", mr.counter)
+func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
+	if model.ID == "" {
+		m.counter++
+		model.ID = fmt.Sprintf("%08d", m.counter-1)
+	} else {
+		if len(model.ID) != 8 || model.ID[0] != '0' {
+			return model, fmt.Errorf("invalid ID format")
+		}
+		idInt, _ := fmt.Sscanf(model.ID, "%08d", new(int))
+		if idInt >= m.counter {
+			m.counter = idInt + 1
+		}
 	}
-	NewModel := model.URLModel{ID: id, URL: m.URL}
-	mr.urls[id] = NewModel
-	return NewModel, nil
+	m.urls = append(m.urls, model)
+	return model, nil
 }
-func (mr *MemoryRepository) GetURL(id string) (model.URLModel, error) {
-	if m, exists := mr.urls[id]; exists {
-		return m, nil
+func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
+	if id == fmt.Sprintf("%08d", m.counter-1) && m.counter > 0 && len(m.urls) > 0 {
+		return m.urls[m.counter-1], nil
 	}
 	return model.URLModel{}, fmt.Errorf("not found")
 }
