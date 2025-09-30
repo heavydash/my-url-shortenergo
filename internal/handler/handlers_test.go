@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"github.com/go-chi/chi"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 func TestHandler_ShortenURL(t *testing.T) {
 	t.Run("Valid POST", func(t *testing.T) {
 		repo := repository.NewMemoryRepository()
-		cfg := &config.Config{BaseURL: "https://test.com/"}
+		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
 		h := NewHandler(repo, cfg)
 		r := chi.NewRouter()
 		h.SetupRoutes(r)
@@ -24,7 +25,7 @@ func TestHandler_ShortenURL(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Contains(t, w.Body.String(), "https://test.com/")
+		assert.Contains(t, w.Body.String(), "http://localhost:33675/")
 	})
 }
 

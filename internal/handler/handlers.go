@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"io"
 	"log"
@@ -51,7 +52,8 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(h.cfg.BaseURL + savedModel.ID))
+	shortURL := fmt.Sprintf("%s%s", h.cfg.BaseURL, savedModel.ID)
+	w.Write([]byte(shortURL))
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
