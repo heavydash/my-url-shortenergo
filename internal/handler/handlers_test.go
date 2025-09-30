@@ -14,8 +14,8 @@ import (
 
 func TestHandler_ShortenURL(t *testing.T) {
 	t.Run("Valid POST", func(t *testing.T) {
-		repo := &repository.MemoryRepository{}
-		cfg := &config.Config{BaseURL: "http://test.com/"}
+		repo := repository.NewMemoryRepository()
+		cfg := &config.Config{BaseURL: "https://test.com/"}
 		h := NewHandler(repo, cfg)
 		r := chi.NewRouter()
 		h.SetupRoutes(r)
@@ -24,13 +24,13 @@ func TestHandler_ShortenURL(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Contains(t, w.Body.String(), "http://test.com/")
+		assert.Contains(t, w.Body.String(), "https://test.com/")
 	})
 }
 
 func TestHandler_HomeHandler(t *testing.T) {
 	t.Run("Valid GET", func(t *testing.T) {
-		repo := &repository.MemoryRepository{}
+		repo := repository.NewMemoryRepository()
 		cfg := &config.Config{}
 		h := NewHandler(repo, cfg)
 		r := chi.NewRouter()

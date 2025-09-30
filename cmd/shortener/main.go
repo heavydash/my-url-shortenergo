@@ -11,7 +11,10 @@ import (
 )
 
 func main() {
-	cfg := config.NewConfig()
+	cfg, err := config.NewConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 	repo := repository.NewMemoryRepository()
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()

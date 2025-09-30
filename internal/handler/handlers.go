@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -31,18 +32,21 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body", 400)
+		log.Printf("Failed reading body: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	url := string(body)
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
-		http.Error(w, "Invalid URL", 400)
+		log.Printf("Invalid URL: %v", url)
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
 	urlModel := model.URLModel{URL: url}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
-		http.Error(w, "Failed to save URL", 500)
+		log.Printf("Error saving URL: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -51,6 +55,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
+		log.Printf("Method not allowed: %s", method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -59,15 +64,18 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if len(id) == 0 {
-		http.Error(w, "Invalid ID", 400)
+		log.Printf("Error invalid ID: empty")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	urlModel, err := h.repo.GetURL(id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, "ID not found", 404)
+			log.Printf("Error finding URL for ID %s: %v", id, err)
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		} else {
-			http.Error(w, "Internal server error", 500)
+			log.Printf("Error finding URL for ID %s: %v", id, err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
 		return
 	}

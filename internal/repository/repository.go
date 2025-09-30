@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
@@ -11,36 +12,46 @@ type URLRepository interface {
 }
 
 type MemoryRepository struct {
-	urls    []model.URLModel
-	counter int
+	urls map[string]model.URLModel
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		urls:    make([]model.URLModel, 0),
-		counter: 0,
+		urls: make(map[string]model.URLModel),
 	}
 }
 
 func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	if model.ID == "" {
-		m.counter++
-		model.ID = fmt.Sprintf("%08d", m.counter-1)
+		var uuidVal uuid.UUID
+		var err error
+		for {
+			uuidVal, err = uuid.NewRandom()
+			if err != nil {
+				return model, fmt.Errorf("error generating uuid: %w", err)
+			}
+			newuuid := uuidVal.String()
+			if _, ok := m.urls[newuuid]; !ok {
+				model.ID = newuuid
+				m.urls[newuuid] = model
+				break
+			}
+		}
 	} else {
-		if len(model.ID) != 8 || model.ID[0] != '0' {
-			return model, fmt.Errorf("invalid ID format")
+		if _, ok := m.urls[model.ID]; !ok {
+			return model, fmt.Errorf("model with id %s does not exist", model.ID)
 		}
-		idInt, _ := fmt.Sscanf(model.ID, "%08d", new(int))
-		if idInt >= m.counter {
-			m.counter = idInt + 1
+		if len(model.ID) != 36 {
+			return model, fmt.Errorf("invalid id format: %s", model.ID)
 		}
+		m.urls[model.ID] = model
 	}
-	m.urls = append(m.urls, model)
 	return model, nil
 }
+
 func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
-	if id == fmt.Sprintf("%08d", m.counter-1) && m.counter > 0 && len(m.urls) > 0 {
-		return m.urls[m.counter-1], nil
+	if _, ok := m.urls[id]; ok {
+		return m.urls[id], nil
 	}
 	return model.URLModel{}, fmt.Errorf("not found")
 }
