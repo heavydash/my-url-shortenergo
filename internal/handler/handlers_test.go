@@ -41,6 +41,6 @@ func TestHandler_HomeHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "URL Shortener Service")
+		assert.Contains(t, w.Body.String(), cfg.BaseURL)
 	})
 }

@@ -52,7 +52,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	shortURL := fmt.Sprintf("%s%s", h.cfg.BaseURL, savedModel.ID)
+	shortURL := fmt.Sprintf("%s%s", strings.TrimRight(h.cfg.BaseURL, "/"), "/"+savedModel.ID)
 	w.Write([]byte(shortURL))
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {

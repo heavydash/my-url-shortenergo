@@ -20,7 +20,7 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("server address (-a) is required")
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = fmt.Sprintf("http://%s/", cfg.ServerAddr)
+		cfg.BaseURL = fmt.Sprintf("https://%s/", cfg.ServerAddr)
 	}
 	return cfg, nil
 }
