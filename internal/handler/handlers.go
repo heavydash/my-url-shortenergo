@@ -28,18 +28,18 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body", 400)
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
 	url := string(body)
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
-		http.Error(w, "Invalid URL", 400)
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
 	urlModel := model.URLModel{URL: url}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
-		http.Error(w, "Failed to save URL", 500)
+		http.Error(w, "Failed to save URL", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -50,15 +50,15 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if len(id) == 0 {
-		http.Error(w, "Invalid ID", 400)
+		http.Error(w, "Invalid ID", http.StatusBadRequest)
 		return
 	}
 	urlModel, err := h.repo.GetURL(id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, "ID not found", 404)
+			http.Error(w, "ID not found", http.StatusNotFound)
 		} else {
-			http.Error(w, "Internal server error", 500)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
 		}
 		return
 	}
