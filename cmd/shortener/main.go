@@ -12,7 +12,7 @@ var counter = 0
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		if r.Method != http.MethodPost { // Логика для POST (ошибка в условии — исправь ниже)
+		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
@@ -62,7 +62,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handler) // Один хендлер для всех методов
+	mux.HandleFunc("/", handler)
 	err := http.ListenAndServe(":8080", mux)
 	fmt.Println("Server stopped:", err)
 	if err != nil {
