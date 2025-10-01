@@ -11,7 +11,7 @@ var urls = make(map[string]string)
 var counter = 0
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method == http.MethodPost {
 		defer r.Body.Close()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
