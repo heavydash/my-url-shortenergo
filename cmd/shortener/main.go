@@ -11,20 +11,16 @@ var urls = make(map[string]string)
 var counter = 0
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", 405)
-			return
-		}
+	if r.Method != http.MethodPost {
 		defer r.Body.Close()
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "Bad request", 400)
+			http.Error(w, "Bad request", http.StatusBadRequest)
 			return
 		}
 		urlStr := string(body)
 		if len(urlStr) == 0 || !strings.HasPrefix(urlStr, "http") {
-			http.Error(w, "Invalid URL", 400)
+			http.Error(w, "Invalid URL", http.StatusBadRequest)
 			return
 		}
 		id := fmt.Sprintf("%08d", counter)
@@ -39,23 +35,23 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(201)
 		_, err = w.Write([]byte("http://localhost:8080/" + id))
 		if err != nil {
-			http.Error(w, "Write error", 500)
+			http.Error(w, "Write error", http.StatusInternalServerError)
 			return
 		}
 	} else if r.Method == http.MethodGet {
 		id := strings.TrimPrefix(r.URL.Path, "/")
 		if len(id) == 0 {
-			http.Error(w, "Invalid ID", 400)
+			http.Error(w, "Invalid ID", http.StatusBadRequest)
 			return
 		}
 		original, ok := urls[id]
 		if !ok {
-			http.Error(w, "Invalid ID", 400)
+			http.Error(w, "Invalid ID", http.StatusBadRequest)
 			return
 		}
 		http.Redirect(w, r, original, http.StatusTemporaryRedirect)
 	} else {
-		http.Error(w, "Method not allowed", 405)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 }
