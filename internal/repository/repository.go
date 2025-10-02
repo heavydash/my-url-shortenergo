@@ -2,7 +2,7 @@ package repository
 
 import (
 	"fmt"
-	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
@@ -23,26 +23,21 @@ func NewMemoryRepository() *MemoryRepository {
 
 func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	if model.ID == "" {
-		var uuidVal uuid.UUID
-		var err error
-		for {
-			uuidVal, err = uuid.NewRandom()
+		maxAttempts := 5
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			newID, err := idgen.IDGen()
 			if err != nil {
 				return model, fmt.Errorf("error generating uuid: %w", err)
 			}
-			newuuid := uuidVal.String()
-			if _, ok := m.urls[newuuid]; !ok {
-				model.ID = newuuid
-				m.urls[newuuid] = model
-				break
+			if _, ok := m.urls[newID]; !ok {
+				model.ID = newID
+				m.urls[newID] = model
 			}
 		}
+		return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
 	} else {
 		if _, ok := m.urls[model.ID]; !ok {
-			return model, fmt.Errorf("model with id %s does not exist", model.ID)
-		}
-		if len(model.ID) != 36 {
-			return model, fmt.Errorf("invalid id format: %s", model.ID)
+			return model, fmt.Errorf("model with id %s already exist", model.ID)
 		}
 		m.urls[model.ID] = model
 	}
