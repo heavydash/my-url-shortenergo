@@ -43,11 +43,17 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
-	urlModel := model.URLModel{URL: url}
+	urlModel := model.URLModel{
+		URL: url,
+	}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
-		log.Printf("Error saving URL: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		log.Printf("Failed saving URL: %v", err)
+		if err.Error() == "failed to generate short ID after 10 attempts" {
+			http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
+		} else {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")

@@ -1,6 +1,9 @@
 package idgen
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+	"log"
+)
 
 const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -13,5 +16,7 @@ func IDGen() (string, error) {
 	for i := range b {
 		b[i] = charset[int(b[i])%len(charset)]
 	}
-	return string(b), nil
+	id := string(b)
+	log.Printf("Generated ID: %s", id)
+	return id, nil
 }

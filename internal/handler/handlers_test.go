@@ -16,6 +16,7 @@ import (
 func TestHandler_ShortenURL(t *testing.T) {
 	t.Run("Valid POST", func(t *testing.T) {
 		repo := repository.NewMemoryRepository()
+		repo.Clear()
 		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
 		h := NewHandler(repo, cfg)
 		r := chi.NewRouter()
@@ -32,6 +33,7 @@ func TestHandler_ShortenURL(t *testing.T) {
 func TestHandler_HomeHandler(t *testing.T) {
 	t.Run("Valid GET", func(t *testing.T) {
 		repo := repository.NewMemoryRepository()
+		repo.Clear()
 		cfg := &config.Config{}
 		h := NewHandler(repo, cfg)
 		r := chi.NewRouter()
