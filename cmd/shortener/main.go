@@ -19,5 +19,6 @@ func main() {
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()
 	h.SetupRoutes(r)
+	log.Printf("Starting server on %S", cfg.ServerAddr)
 	log.Fatal(http.ListenAndServe(cfg.ServerAddr, r))
 }

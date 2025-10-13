@@ -37,19 +37,26 @@ func NewConfig() (*Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
 	}
-	if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
-		log.Printf("Using server address: %s", addr)
-		cfg.ServerAddr = addr
+	if port, exists := os.LookupEnv("PORT"); exists && port != "" {
+		log.Printf("Using SERVER_PORT environment variable %s", port)
+		if !strings.HasSuffix(port, ":") {
+			port = ":" + port
+		}
+		cfg.ServerAddr = port
 	} else {
-		log.Printf("Using default server address: %s", cfg.ServerAddr)
+		if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
+			log.Printf("Using SERVER_ADDR from env: %s", addr)
+			cfg.ServerAddr = addr
+		} else {
+			log.Printf("Using default server address: %s", cfg.ServerAddr)
+		}
+		if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
+			log.Printf("Using base URL: %s", URL)
+			cfg.BaseURL = URL
+		} else {
+			log.Printf("Using default base URL: %s", cfg.BaseURL)
+		}
 	}
-	if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
-		log.Printf("Using base URL: %s", URL)
-		cfg.BaseURL = URL
-	} else {
-		log.Printf("Using default base URL: %s", cfg.BaseURL)
-	}
-
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = fmt.Sprintf("https://%s/", cfg.ServerAddr)
 	}
