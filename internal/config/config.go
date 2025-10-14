@@ -43,19 +43,17 @@ func NewConfig() (*Config, error) {
 			port = ":" + port
 		}
 		cfg.ServerAddr = port
+	} else if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
+		log.Printf("Using SERVER_ADDR from env: %s", addr)
+		cfg.ServerAddr = addr
 	} else {
-		if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
-			log.Printf("Using SERVER_ADDR from env: %s", addr)
-			cfg.ServerAddr = addr
-		} else {
-			log.Printf("Using default server address: %s", cfg.ServerAddr)
-		}
-		if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
-			log.Printf("Using base URL: %s", URL)
-			cfg.BaseURL = URL
-		} else {
-			log.Printf("Using default base URL: %s", cfg.BaseURL)
-		}
+		log.Printf("Using default server address: %s", cfg.ServerAddr)
+	}
+	if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
+		log.Printf("Using base URL: %s", URL)
+		cfg.BaseURL = URL
+	} else {
+		log.Printf("Using default base URL: %s", cfg.BaseURL)
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = fmt.Sprintf("https://%s/", cfg.ServerAddr)
