@@ -47,7 +47,7 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 		}
 		return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
 	} else {
-		if _, ok := m.urls[model.ID]; !ok {
+		if _, ok := m.urls[model.ID]; ok {
 			return model, fmt.Errorf("model with id %s already exist", model.ID)
 		}
 		m.urls[model.ID] = model

@@ -1,15 +1,16 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"io"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
@@ -24,6 +25,7 @@ func NewHandler(repo repository.URLRepository, cfg *config.Config) *Handler {
 }
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
+	r.Post("/api/shorten", h.ShortenURL)
 	r.Post("/", h.ShortenURL)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
@@ -31,13 +33,28 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("Failed reading body: %v", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
+	var url string
+	if strings.HasPrefix(r.URL.Path, "/api/shorten") {
+		var body struct {
+			url string `json:"url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			log.Printf("Fail decoding JSON body: %v", err)
+			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		url = body.url
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("Fail reading body: %v", err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		url = string(bodyBytes)
+		w.Header().Set("Content-Type", "text/plain")
 	}
-	url := string(body)
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
 		log.Printf("Invalid URL: %v", url)
 		http.Error(w, "Invalid URL", http.StatusBadRequest)
@@ -48,18 +65,24 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
-		log.Printf("Failed saving URL: %v", err)
-		if err.Error() == "failed to generate short ID after 10 attempts" {
+		log.Printf("fail to save URL: %v", err)
+		if strings.Contains(err.Error(), "failed to generate unique short ID after 5 attempts") {
 			http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
 		} else {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain")
+	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.ID)
 	w.WriteHeader(http.StatusCreated)
-	shortURL := fmt.Sprintf("%s%s", strings.TrimRight(h.cfg.BaseURL, "/"), "/"+savedModel.ID)
-	w.Write([]byte(shortURL))
+	if strings.HasPrefix(r.URL.Path, "/api/shorten") {
+		response := struct {
+			Result string `json:"result"`
+		}{Result: shortURL}
+		json.NewEncoder(w).Encode(response)
+	} else {
+		w.Write([]byte(shortURL))
+	}
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
@@ -87,5 +110,6 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.Redirect(w, r, urlModel.URL, http.StatusTemporaryRedirect)
+	w.Header().Set("Location", urlModel.URL)
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
