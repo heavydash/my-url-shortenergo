@@ -3,15 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
+	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"io"
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
 type Handler struct {
@@ -21,7 +20,6 @@ type Handler struct {
 
 func NewHandler(repo repository.URLRepository, cfg *config.Config) *Handler {
 	return &Handler{repo: repo, cfg: cfg}
-
 }
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
@@ -34,18 +32,25 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var url string
-	if strings.HasPrefix(r.URL.Path, "/api/shorten") {
+	isAPI := strings.HasPrefix(r.URL.Path, "/api/shorten")
+
+	if isAPI {
+		w.Header().Set("Content-Type", "application/json")
 		var body struct {
-			url string `json:"url"`
+			URL string `json:"url"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			log.Printf("Fail decoding JSON body: %v", err)
-			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			response := struct {
+				Error string `json:"error"`
+			}{Error: "Invalid JSON body"}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
 			return
 		}
-		url = body.url
-		w.Header().Set("Content-Type", "application/json")
+		url = body.URL
 	} else {
+		w.Header().Set("Content-Type", "text/plain")
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			log.Printf("Fail reading body: %v", err)
@@ -53,11 +58,18 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		url = string(bodyBytes)
-		w.Header().Set("Content-Type", "text/plain")
 	}
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
 		log.Printf("Invalid URL: %v", url)
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		if isAPI {
+			response := struct {
+				Error string `json:"error"`
+			}{Error: "Invalid URL"}
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+		} else {
+			http.Error(w, "Invalid URL", http.StatusBadRequest)
+		}
 		return
 	}
 	urlModel := model.URLModel{
@@ -67,15 +79,31 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("fail to save URL: %v", err)
 		if strings.Contains(err.Error(), "failed to generate unique short ID after 5 attempts") {
-			http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
+			if isAPI {
+				response := struct {
+					Error string `json:"error"`
+				}{Error: "Server overloaded, try again later"}
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(response)
+			} else {
+				http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
+			}
 		} else {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			if isAPI {
+				response := struct {
+					Error string `json:"error"`
+				}{Error: http.StatusText(http.StatusInternalServerError)}
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(response)
+			} else {
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
 		}
 		return
 	}
 	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.ID)
 	w.WriteHeader(http.StatusCreated)
-	if strings.HasPrefix(r.URL.Path, "/api/shorten") {
+	if isAPI {
 		response := struct {
 			Result string `json:"result"`
 		}{Result: shortURL}
@@ -85,8 +113,8 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
-	if method := r.Method; method != http.MethodGet {
-		log.Printf("Method not allowed: %s", method)
+	if r.Method != http.MethodGet {
+		log.Printf("Method not allowed: %s", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
