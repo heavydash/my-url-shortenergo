@@ -26,10 +26,6 @@ func NewMemoryRepository() *MemoryRepository {
 func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	newModel := model
 	if newModel.ID != "" {
-		log.Printf("Resetting existing ID: %s", model.ID)
-		newModel.ID = ""
-	}
-	if newModel.ID == "" {
 		maxAttempts := 5
 		log.Printf("Attempting to save URL, current Urls size: %d", len(m.urls))
 		for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -46,12 +42,11 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 			}
 		}
 		return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
-	} else {
-		if _, ok := m.urls[model.ID]; ok {
-			return model, fmt.Errorf("model with id %s already exist", model.ID)
-		}
-		m.urls[model.ID] = model
 	}
+	if _, ok := m.urls[model.ID]; ok {
+		return model, fmt.Errorf("model with id %s already exist", model.ID)
+	}
+	m.urls[model.ID] = model
 	return model, nil
 }
 

@@ -68,4 +68,5 @@ func NewConfig() (*Config, error) {
 		cfg.ServerAddr = "localhost:8080"
 	}
 	return cfg, nil
+
 }
