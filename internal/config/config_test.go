@@ -95,13 +95,30 @@ func TestNewConfig(t *testing.T) {
 		assert.Equal(t, ":33507", cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
+	//SERVER_PORT задан
+	t.Run("server_port_set", func(t *testing.T) {
+		// Заметка: Добавлен тест для проверки SERVER_PORT
+		os.Setenv("SERVER_PORT", "33507")
+		os.Setenv("BASE_URL", "http://example.com")
+		defer os.Unsetenv("SERVER_PORT")
+		defer os.Unsetenv("BASE_URL")
+
+		originalArgs := os.Args
+		os.Args = []string{"test", "-a", ":33507"}
+		defer func() { os.Args = originalArgs }()
+
+		cfg, err := NewConfig()
+		require.NoError(t, err)
+		assert.Equal(t, ":33507", cfg.ServerAddr)
+		assert.Equal(t, "http://example.com", cfg.BaseURL)
+	})
 
 	t.Run("server_port_set_no_flags", func(t *testing.T) {
 		os.Setenv("SERVER_PORT", "33507")
 		defer os.Unsetenv("SERVER_PORT")
 
 		originalArgs := os.Args
-		os.Args = []string{"test"}
+		os.Args = []string{"test", "-a", ":33507"}
 		defer func() { os.Args = originalArgs }()
 
 		cfg, err := NewConfig()
