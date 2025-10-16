@@ -44,19 +44,17 @@ func NewConfig() (*Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("parsing flags, :%w", err)
 	}
-	if !serverPortSet {
-		if addr, exists := os.LookupEnv("SERVER_ADDR"); exists && addr != "" {
-			log.Printf("Using server address from SERVER_ADDR: %s", addr)
-			cfg.ServerAddr = addr
-		} else {
-			log.Printf("Using default server address from SERVER_ADDR: %s", cfg.ServerAddr)
+	if port, exists := os.LookupEnv("SERVER_PORT"); exists && port != "" {
+		log.Printf("Using server port from SERVER_PORT: %s", port)
+		cfg.ServerAddr = fmt.Sprintf("localhost:%s", port)
+	} else if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
+		log.Printf("Using server address from SERVER_ADDRESS: %s", addr)
+		if !strings.Contains(addr, ":") {
+			addr = ":" + addr
 		}
-	}
-	if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
-		log.Printf("Using base URL: %s", URL)
-		cfg.BaseURL = URL
-	} else {
-		log.Printf("Using default base URL: %s", cfg.BaseURL)
+		cfg.ServerAddr = addr
+	} else if fs.NFlag() == 0 {
+		log.Printf("Using default server address: %s", cfg.ServerAddr)
 	}
 
 	if cfg.BaseURL == "" {

@@ -16,7 +16,7 @@ func TestNewConfig(t *testing.T) {
 		defer os.Unsetenv("BASE_URL")
 
 		originalArgs := os.Args
-		os.Args = []string{"test", "-a", ":8080", "-b", "https://test.com"}
+		os.Args = []string{"test"}
 		defer func() { os.Args = originalArgs }()
 
 		cfg, err := NewConfig()
@@ -80,14 +80,13 @@ func TestNewConfig(t *testing.T) {
 	})
 	//SERVER_PORT задан
 	t.Run("server_port_set", func(t *testing.T) {
-		// Заметка: Добавлен тест для проверки SERVER_PORT
 		os.Setenv("SERVER_PORT", "33507")
 		os.Setenv("BASE_URL", "http://example.com")
 		defer os.Unsetenv("SERVER_PORT")
 		defer os.Unsetenv("BASE_URL")
 
 		originalArgs := os.Args
-		os.Args = []string{"test", "-a", ":33507"}
+		os.Args = []string{"test"}
 		defer func() { os.Args = originalArgs }()
 
 		cfg, err := NewConfig()
@@ -95,21 +94,5 @@ func TestNewConfig(t *testing.T) {
 		assert.Equal(t, "localhost:33507", cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
-	//SERVER_PORT задан
-	t.Run("server_port_set", func(t *testing.T) {
-		// Заметка: Добавлен тест для проверки SERVER_PORT
-		os.Setenv("SERVER_PORT", "33507")
-		os.Setenv("BASE_URL", "http://example.com")
-		defer os.Unsetenv("SERVER_PORT")
-		defer os.Unsetenv("BASE_URL")
 
-		originalArgs := os.Args
-		os.Args = []string{"test", "-a", ":33507"}
-		defer func() { os.Args = originalArgs }()
-
-		cfg, err := NewConfig()
-		require.NoError(t, err)
-		assert.Equal(t, "localhost:33507", cfg.ServerAddr)
-		assert.Equal(t, "http://example.com", cfg.BaseURL)
-	})
 }
