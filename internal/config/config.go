@@ -16,7 +16,7 @@ type Config struct {
 
 func NewConfig() (*Config, error) {
 	cfg := &Config{
-		ServerAddr: "localhost:8080",
+		ServerAddr: ":8080",
 		BaseURL:    "http://localhost:8080",
 	}
 

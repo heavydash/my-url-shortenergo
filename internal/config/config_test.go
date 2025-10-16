@@ -43,7 +43,7 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Equal(t, "localhost:8080", cfg.ServerAddr)
+		assert.Equal(t, ":8080", cfg.ServerAddr)
 		assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 	})
 	//Пустые переменные окружения
@@ -92,7 +92,7 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Equal(t, ":33507", cfg.ServerAddr)
+		assert.Equal(t, "localhost:33507", cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
 	//SERVER_PORT задан
