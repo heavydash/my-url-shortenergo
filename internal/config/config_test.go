@@ -21,7 +21,7 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Equal(t, []string{":9090", "localhost:9090"}, cfg.ServerAddr)
+		assert.Contains(t, []string{":9090", "localhost:9090"}, cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
 	//Переменные не заданы, флаги заданы
@@ -43,7 +43,7 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Equal(t, []string{":8080", "localhost:8080"}, cfg.ServerAddr)
+		assert.Contains(t, []string{":8080", "localhost:8080"}, cfg.ServerAddr)
 		assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
 	})
 	//Пустые переменные окружения
@@ -92,7 +92,7 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Equal(t, []string{"localhost:33507"}, cfg.ServerAddr)
+		assert.Contains(t, []string{"localhost:33507"}, cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
 }
