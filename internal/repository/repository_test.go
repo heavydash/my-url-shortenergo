@@ -60,9 +60,10 @@ func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 
 func TestMemoryRepository_Clear(t *testing.T) {
 	repo := NewMemoryRepository()
-	saved, _ := repo.SaveURL(model.URLModel{URL: "http://example.com"})
-	repo.Clear()
-
-	_, err := repo.GetURL(saved.ID)
+	model1 := model.URLModel{URL: "http://example.com"}
+	savedModel, err := repo.SaveURL(model1)
 	require.NoError(t, err)
+	repo.Clear()
+	_, err = repo.GetURL(savedModel.ID)
+	assert.Error(t, err)
 }

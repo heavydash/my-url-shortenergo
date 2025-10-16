@@ -26,33 +26,28 @@ func NewMemoryRepository() *MemoryRepository {
 func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	newModel := model
 	if newModel.ID != "" {
-		log.Printf("Resetting existing ID: %s", model.ID)
-		newModel.ID = ""
-	}
-	if newModel.ID == "" {
-		maxAttempts := 5
-		log.Printf("Attempting to save URL, current Urls size: %d", len(m.urls))
-		for attempt := 0; attempt < maxAttempts; attempt++ {
-			newID, err := idgen.IDGen()
-			if err != nil {
-				return model, fmt.Errorf("error generating uuid: %w", err)
-			}
-			currentModel := model
-			log.Printf("Attempt %d, checking ID: %s, Urls size: %d", attempt, newID, len(m.urls))
-			if _, ok := m.urls[newID]; !ok {
-				currentModel.ID = newID
-				m.urls[newID] = currentModel
-				return currentModel, nil
-			}
+		if _, ok := m.urls[newModel.ID]; ok {
+			return model, fmt.Errorf("url with id %s already exists", newModel.ID)
 		}
-		return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
-	} else {
-		if _, ok := m.urls[model.ID]; !ok {
-			return model, fmt.Errorf("model with id %s already exist", model.ID)
-		}
-		m.urls[model.ID] = model
+		m.urls[newModel.ID] = newModel
+		return newModel, nil
 	}
-	return model, nil
+	maxAttempts := 5
+	log.Printf("Attempting to save URL, current Urls size: %d", len(m.urls))
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		newID, err := idgen.IDGen()
+		if err != nil {
+			return model, fmt.Errorf("error generating uuid: %w", err)
+		}
+		currentModel := model
+		log.Printf("Attempt %d, checking ID: %s, Urls size: %d", attempt, newID, len(m.urls))
+		if _, ok := m.urls[newID]; !ok {
+			currentModel.ID = newID
+			m.urls[newID] = currentModel
+			return currentModel, nil
+		}
+	}
+	return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
 }
 
 func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {

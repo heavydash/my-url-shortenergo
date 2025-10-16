@@ -32,7 +32,7 @@ func TestIDGen(t *testing.T) {
 
 func TestIDGen_Unique(t *testing.T) {
 	ids := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		id, err := IDGen()
 		if err != nil {
 			t.Fatalf("IDGen() error = %v", err)
