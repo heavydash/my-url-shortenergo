@@ -37,12 +37,17 @@ func NewConfig() (*Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
 	}
-	if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
+
+	if port, exists := os.LookupEnv("SERVER_PORT"); exists && port != "" {
+		log.Printf("Using server port from SERVER_PORT: %s", port)
+		cfg.ServerAddr = fmt.Sprintf("localhost:%s", port)
+	} else if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
 		log.Printf("Using server address: %s", addr)
 		cfg.ServerAddr = addr
 	} else {
 		log.Printf("Using default server address: %s", cfg.ServerAddr)
 	}
+
 	if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
 		log.Printf("Using base URL: %s", URL)
 		cfg.BaseURL = URL
