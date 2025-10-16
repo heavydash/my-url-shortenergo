@@ -16,7 +16,7 @@ type Config struct {
 
 func NewConfig() (*Config, error) {
 	cfg := &Config{
-		ServerAddr: "localhost:8080",
+		ServerAddr: ":localhost:8080",
 		BaseURL:    "http://localhost:8080",
 	}
 
@@ -40,7 +40,7 @@ func NewConfig() (*Config, error) {
 
 	if port, exists := os.LookupEnv("SERVER_PORT"); exists && port != "" {
 		log.Printf("Using server port from SERVER_PORT: %s", port)
-		cfg.ServerAddr = fmt.Sprintf("localhost:%s", port)
+		cfg.ServerAddr = fmt.Sprintf(":%s", port)
 	} else if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
 		log.Printf("Using server address: %s", addr)
 		cfg.ServerAddr = addr
