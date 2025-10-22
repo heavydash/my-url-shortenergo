@@ -25,6 +25,7 @@ func NewHandler(repo repository.URLRepository, cfg *config.Config) *Handler {
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Post("/", h.ShortenURL)
+	r.Post("/api/shorten", h.ShortenURL)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
 }
@@ -37,11 +38,50 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	url := string(body)
+	var url string
+
+	isAPI := strings.HasPrefix(r.URL.Path, "/api/shorten")
+	isJSON := strings.Contains(r.Header.Get("Content-Type"), "application/json")
+
+	if isAPI && isJSON {
+		req := model.Request{}
+		if err := req.UnmarshalJSON(body); err != nil {
+			log.Printf("Failed unmarshalling body: %v", err)
+			resp := model.Response{Error: "Invalid JSON body"}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			data, err := resp.MarshalJSON()
+			if err != nil {
+				log.Printf("Failed writing body: %v", err)
+				http.Error(w, "Failed writing body", http.StatusInternalServerError)
+				return
+			}
+			w.Write(data)
+			return
+		}
+		url = req.URL
+	} else {
+		url = string(body)
+	}
+
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
-		log.Printf("Invalid URL: %v", url)
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
-		return
+		if isAPI && isJSON {
+			log.Printf("Invalid URL: %v", url)
+			resp := model.Response{Error: "Invalid URL"}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			data, err := resp.MarshalJSON()
+			if err != nil {
+				log.Printf("Failed writing body: %v", err)
+				http.Error(w, "Failed writing body", http.StatusInternalServerError)
+				return
+			}
+			w.Write(data)
+			return
+		} else {
+			http.Error(w, "Invalid URL", http.StatusBadRequest)
+			return
+		}
 	}
 	urlModel := model.URLModel{
 		URL: url,
@@ -50,16 +90,58 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Failed saving URL: %v", err)
 		if err.Error() == "failed to generate short ID after 10 attempts" {
-			http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
+			if isAPI && isJSON {
+				resp := model.Response{Error: "Server overloaded, try again later"}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				data, err := resp.MarshalJSON()
+				if err != nil {
+					log.Printf("Failed writing body: %v", err)
+					http.Error(w, "Failed writing body", http.StatusInternalServerError)
+					return
+				}
+				w.Write(data)
+			} else {
+				http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
+				return
+			}
 		} else {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			if isAPI && isJSON {
+				resp := model.Response{Error: "Internal server error"}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				data, err := resp.MarshalJSON()
+				if err != nil {
+					log.Printf("Failed writing body: %v", err)
+					http.Error(w, "Failed writing body", http.StatusInternalServerError)
+					return
+				}
+				w.Write(data)
+				return
+			} else {
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return
+			}
 		}
-		return
 	}
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	shortURL := fmt.Sprintf("%s%s", strings.TrimRight(h.cfg.BaseURL, "/"), "/"+savedModel.ID)
-	w.Write([]byte(shortURL))
+	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.ID)
+	if isAPI && isJSON {
+		resp := model.Response{Result: shortURL}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		data, err := resp.MarshalJSON()
+		if err != nil {
+			log.Printf("Failed writing body: %v", err)
+			http.Error(w, "Failed writing body", http.StatusInternalServerError)
+			return
+		}
+		w.Write(data)
+		return
+	} else {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(shortURL))
+	}
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
