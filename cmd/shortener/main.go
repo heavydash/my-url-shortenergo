@@ -26,6 +26,7 @@ func main() {
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()
 	r.Use(middleware.Logging(logger))
+	r.Use(middleware.GzipMiddleware)
 	h.SetupRoutes(r)
 	if err := http.ListenAndServe(cfg.ServerAddr, r); err != nil {
 		logger.Fatal("Fail to server start", zap.Error(err))
