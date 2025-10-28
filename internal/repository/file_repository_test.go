@@ -79,8 +79,8 @@ func TestFileRepository_SaveURL(t *testing.T) {
 }
 func TestFileRepository_GetURL(t *testing.T) {
 	t.Run("Get existing url", func(t *testing.T) {
-		tmp, err := os.CreateTemp("", "test_urls.json")
-		require.NoError(t, err)
+		tmp, _ := os.CreateTemp("", "test_urls.json")
+		require.NotNil(t, tmp)
 		defer os.Remove(tmp.Name())
 
 		repo, err := NewFileRepository(tmp.Name())
@@ -96,8 +96,8 @@ func TestFileRepository_GetURL(t *testing.T) {
 
 	})
 	t.Run("Get non existing url", func(t *testing.T) {
-		tmp, err := os.CreateTemp("", "test_urls.json")
-		require.NoError(t, err)
+		tmp, _ := os.CreateTemp("", "test_urls.json")
+		require.NotNil(t, tmp)
 		defer os.Remove(tmp.Name())
 
 		repo, err := NewFileRepository(tmp.Name())
@@ -109,8 +109,8 @@ func TestFileRepository_GetURL(t *testing.T) {
 	})
 }
 func TestFileRepository_Clear(t *testing.T) {
-	tmp, err := os.CreateTemp("", "test_urls_*.json")
-	require.NoError(t, err)
+	tmp, _ := os.CreateTemp("", "test_urls_*.json")
+	require.NotNil(t, tmp)
 	defer os.Remove(tmp.Name())
 
 	repo, err := NewFileRepository(tmp.Name())
