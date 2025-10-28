@@ -16,8 +16,8 @@ func TestMemoryRepository_SaveURL(t *testing.T) {
 		model   model.URLModel
 		wantErr bool
 	}{
-		{"save new URL", model.URLModel{URL: "http://example.com"}, false},
-		{"save empty URL", model.URLModel{URL: ""}, false},
+		{"save new URL", model.URLModel{OriginalURL: "http://example.com"}, false},
+		{"save empty URL", model.URLModel{OriginalURL: ""}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -27,12 +27,12 @@ func TestMemoryRepository_SaveURL(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.NotEmpty(t, saved.ID)
-			assert.Equal(t, tt.model.URL, saved.URL)
+			assert.NotEmpty(t, saved.UUID)
+			assert.Equal(t, tt.model.OriginalURL, saved.OriginalURL)
 
-			got, err := repo.GetURL(saved.ID)
+			got, err := repo.GetURL(saved.UUID)
 			require.NoError(t, err)
-			assert.Equal(t, saved.ID, got.ID)
+			assert.Equal(t, saved.UUID, got.UUID)
 		})
 	}
 }
@@ -49,7 +49,7 @@ func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 	repo := NewMemoryRepository()
 	repo.Clear()
 
-	modelanother := model.URLModel{ID: "testid", URL: "http://example.com"}
+	modelanother := model.URLModel{UUID: "testid", OriginalURL: "http://example.com"}
 	_, err := repo.SaveURL(modelanother)
 	require.NoError(t, err)
 
@@ -60,10 +60,10 @@ func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 
 func TestMemoryRepository_Clear(t *testing.T) {
 	repo := NewMemoryRepository()
-	model1 := model.URLModel{URL: "http://example.com"}
+	model1 := model.URLModel{OriginalURL: "http://example.com"}
 	savedModel, err := repo.SaveURL(model1)
 	require.NoError(t, err)
 	repo.Clear()
-	_, err = repo.GetURL(savedModel.ID)
+	_, err = repo.GetURL(savedModel.UUID)
 	assert.Error(t, err)
 }

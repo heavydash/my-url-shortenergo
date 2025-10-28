@@ -17,12 +17,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	logger, err := zap.NewProduction()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer logger.Sync()
-	repo := repository.NewMemoryRepository()
+
+	repo, err := repository.NewFileRepository(cfg.FileStorage)
+	if err != nil {
+		logger.Fatal("failed to create repository", zap.Error(err))
+	}
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()
 	r.Use(middleware.Logging(logger))
