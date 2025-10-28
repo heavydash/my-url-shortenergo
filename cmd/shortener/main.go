@@ -5,6 +5,7 @@ import (
 	"go.uber.org/zap"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
@@ -24,9 +25,18 @@ func main() {
 	}
 	defer logger.Sync()
 
-	repo, err := repository.NewFileRepository(cfg.FileStorage)
-	if err != nil {
-		logger.Fatal("failed to create repository", zap.Error(err))
+	var repo repository.URLRepository
+	if cfg.FileStorage != "" {
+		if err := os.WriteFile(cfg.FileStorage, []byte{}, 0644); err != nil {
+			logger.Fatal("cannot clear file storage", zap.Error(err))
+		}
+		var err error
+		repo, err = repository.NewFileRepository(cfg.FileStorage)
+		if err != nil {
+			logger.Fatal("failed to create file repo", zap.Error(err))
+		}
+	} else {
+		repo = repository.NewMemoryRepository()
 	}
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()

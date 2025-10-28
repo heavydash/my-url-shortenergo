@@ -119,19 +119,22 @@ func (r *FileRepository) Clear() {
 }
 
 func (r *FileRepository) LoadURLs() ([]model.URLModel, error) {
-	file, err := os.Open(r.file.Name())
-	if err != nil {
-		return nil, err
+	r.file.Seek(0, 0)
+	decoder := json.NewDecoder(r.file)
+	var loaded []model.URLModel
+
+	for {
+		var url model.URLModel
+		if err := decoder.Decode(&url); err != nil {
+			if err == io.EOF {
+				break
+			}
+			continue
+		}
+		if url.UUID != "" {
+			r.urls[url.UUID] = url
+			loaded = append(loaded, url)
+		}
 	}
-	defer file.Close()
-	var urls []model.URLModel
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&urls)
-	for err != nil && err != io.EOF {
-		return nil, err
-	}
-	for _, url := range urls {
-		r.urls[url.UUID] = url
-	}
-	return urls, nil
+	return loaded, nil
 }
