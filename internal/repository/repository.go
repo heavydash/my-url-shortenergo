@@ -25,11 +25,11 @@ func NewMemoryRepository() *MemoryRepository {
 
 func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	newModel := model
-	if newModel.ID != "" {
-		if _, ok := m.urls[newModel.ID]; ok {
-			return model, fmt.Errorf("url with id %s already exists", newModel.ID)
+	if newModel.UUID != "" {
+		if _, ok := m.urls[newModel.UUID]; ok {
+			return model, fmt.Errorf("url with id %s already exists", newModel.UUID)
 		}
-		m.urls[newModel.ID] = newModel
+		m.urls[newModel.UUID] = newModel
 		return newModel, nil
 	}
 	maxAttempts := 5
@@ -42,7 +42,7 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 		currentModel := model
 		log.Printf("Attempt %d, checking ID: %s, Urls size: %d", attempt, newID, len(m.urls))
 		if _, ok := m.urls[newID]; !ok {
-			currentModel.ID = newID
+			currentModel.UUID = newID
 			m.urls[newID] = currentModel
 			return currentModel, nil
 		}

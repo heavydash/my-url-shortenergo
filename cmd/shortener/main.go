@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"github.com/go-chi/chi"
 	"go.uber.org/zap"
 	"log"
@@ -13,16 +14,28 @@ import (
 )
 
 func main() {
+
+	flag.String("a", "", "server address")
+	flag.String("b", "", "base URL")
+	flag.Parse()
+
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal(err)
+	}
+	fileCfg := config.NewFileStorageConfig()
+
+	var repo repository.URLRepository
+	if fileCfg.Path != "" {
+		repo = repository.NewFileRepository(fileCfg.Path)
+	} else {
+		repo = repository.NewMemoryRepository()
 	}
 	logger, err := zap.NewProduction()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer logger.Sync()
-	repo := repository.NewMemoryRepository()
 	h := handler.NewHandler(repo, cfg)
 	r := chi.NewRouter()
 	r.Use(middleware.Logging(logger))

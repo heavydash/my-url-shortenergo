@@ -84,7 +84,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	urlModel := model.URLModel{
-		URL: url,
+		OriginalURL: url,
 	}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
@@ -124,7 +124,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.ID)
+	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.UUID)
 	if isAPI && isJSON {
 		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
@@ -169,5 +169,5 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.Redirect(w, r, urlModel.URL, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, urlModel.OriginalURL, http.StatusTemporaryRedirect)
 }
