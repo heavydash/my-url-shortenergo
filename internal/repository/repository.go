@@ -2,62 +2,45 @@ package repository
 
 import (
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"log"
 )
 
 type URLRepository interface {
 	SaveURL(m model.URLModel) (model.URLModel, error)
 	GetURL(id string) (model.URLModel, error)
-	Clear()
 }
 
 type MemoryRepository struct {
-	urls map[string]model.URLModel
+	urls    map[string]model.URLModel
+	counter int
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		urls: make(map[string]model.URLModel),
+		urls:    make(map[string]model.URLModel),
+		counter: 0,
 	}
 }
 
-func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
-	newModel := model
-	if newModel.UUID != "" {
-		if _, ok := m.urls[newModel.UUID]; ok {
-			return model, fmt.Errorf("url with id %s already exists", newModel.UUID)
-		}
-		m.urls[newModel.UUID] = newModel
-		return newModel, nil
-	}
-	maxAttempts := 5
-	log.Printf("Attempting to save URL, current Urls size: %d", len(m.urls))
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		newID, err := idgen.IDGen()
-		if err != nil {
-			return model, fmt.Errorf("error generating uuid: %w", err)
-		}
-		currentModel := model
-		log.Printf("Attempt %d, checking ID: %s, Urls size: %d", attempt, newID, len(m.urls))
-		if _, ok := m.urls[newID]; !ok {
-			currentModel.UUID = newID
-			m.urls[newID] = currentModel
-			return currentModel, nil
-		}
-	}
-	return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
+func (mr *MemoryRepository) InitializeForTest(id string, url string) {
+	mr.urls[id] = model.URLModel{ID: id, URL: url}
+	mr.counter = 1
 }
 
-func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
-	if _, ok := m.urls[id]; ok {
-		return m.urls[id], nil
+func (mr *MemoryRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
+	id := fmt.Sprintf("%08d", mr.counter)
+	mr.counter++
+	if _, exists := mr.urls[id]; exists {
+		mr.counter++
+		id = fmt.Sprintf("%08d", mr.counter)
+	}
+	NewModel := model.URLModel{ID: id, URL: m.URL}
+	mr.urls[id] = NewModel
+	return NewModel, nil
+}
+func (mr *MemoryRepository) GetURL(id string) (model.URLModel, error) {
+	if m, exists := mr.urls[id]; exists {
+		return m, nil
 	}
 	return model.URLModel{}, fmt.Errorf("not found")
-}
-
-func (m *MemoryRepository) Clear() {
-	m.urls = make(map[string]model.URLModel)
-	log.Printf("Cleared Urls, new size: %d", len(m.urls))
 }

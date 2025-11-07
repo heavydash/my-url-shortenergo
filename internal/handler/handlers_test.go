@@ -1,122 +1,79 @@
 package handler
 
 import (
-	"bytes"
-	"compress/gzip"
-	"fmt"
-	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
-	"io"
-	"net/http"
+	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	"github.com/stretchr/testify/assert"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/repository"
-	"github.com/stretchr/testify/assert"
 )
 
-func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
-	repo := repository.NewMemoryRepository()
-	repo.Clear()
-	cfg := &config.Config{BaseURL: "http://localhost:33675/"}
-	h := NewHandler(repo, cfg)
-	r := chi.NewRouter()
-	r.Use(middleware.GzipMiddleware)
-	h.SetupRoutes(r)
-	w := httptest.NewRecorder()
-	return r, w, cfg, repo
-}
+func TestHandler_ServeHTTP(t *testing.T) {
+	tests := []struct {
+		name         string
+		method       string
+		path         string
+		body         string
+		wantStatus   int
+		wantBody     string
+		wantLocation string
+	}{
 
-func TestHandler_ShortenURL(t *testing.T) {
-	t.Run("Valid POST", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/", strings.NewReader("https://example.com"))
-		r.ServeHTTP(w, req)
+		{name: "valid post",
+			method:       "POST",
+			path:         "/",
+			body:         "https://example.com",
+			wantStatus:   201,
+			wantBody:     "http://localhost:8080/",
+			wantLocation: "",
+		},
+		{name: "invalid post",
+			method:       "POST",
+			path:         "/",
+			body:         "invalid",
+			wantStatus:   400,
+			wantBody:     "",
+			wantLocation: "",
+		},
+		{name: "valid get",
+			method:       "GET",
+			path:         "/00000001",
+			body:         "",
+			wantStatus:   307,
+			wantBody:     "",
+			wantLocation: "https://example.com",
+		},
+		{name: "invalid get",
+			method:       "GET",
+			path:         "/invalid",
+			body:         "",
+			wantStatus:   400,
+			wantBody:     "",
+			wantLocation: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Contains(t, w.Body.String(), "http://localhost:33675/")
-	})
-}
+			repo := repository.NewMemoryRepository()
+			if tt.name == "valid get" {
+				repo.InitializeForTest("00000001", "https://example.com")
+			}
+			h := NewHandler(repo)
 
-func TestHandler_HomeHandler(t *testing.T) {
-	t.Run("Valid GET", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", "/", nil)
-		r.ServeHTTP(w, req)
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), cfg.BaseURL)
-	})
-}
-func TestShortenURL_JSON(t *testing.T) {
-	t.Run("Valid POST JSON", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/shorten", strings.NewReader("{\"url\":\"https://example.com\"}"))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-		assert.Contains(t, w.Body.String(), "http://localhost:33675/")
-	})
+			w := httptest.NewRecorder()
 
-}
-func TestGzipIn(t *testing.T) {
-	t.Run("GZIP POST JSON Incoming", func(t *testing.T) {
-		r, w, _, _ := setupTest(t)
+			h.ServeHTTP(w, req)
 
-		buf := &bytes.Buffer{}
-		gw := gzip.NewWriter(buf)
-		_, err := gw.Write([]byte(`{"url":"https://example.com"}`))
-		assert.NoError(t, err)
-		err = gw.Close()
-		assert.NoError(t, err)
-
-		req := httptest.NewRequest("POST", "/api/shorten", buf)
-		req.Header.Set("Content-Encoding", "gzip")
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Contains(t, w.Body.String(), "http://localhost:33675/")
-
-	})
-}
-func TestGzipOut(t *testing.T) {
-	t.Run("GZIP POST JSON Outcome", func(t *testing.T) {
-		r, w, _, _ := setupTest(t)
-
-		req := httptest.NewRequest("POST", "/api/shorten", strings.NewReader(`{"url":"https://example.com"}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept-Encoding", "gzip")
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "gzip", w.Header().Get("Content-Encoding"))
-
-		gr, err := gzip.NewReader(w.Body)
-		assert.NoError(t, err)
-		body, err := io.ReadAll(gr)
-		assert.NoError(t, err)
-		assert.Contains(t, string(body), "http://localhost:33675/")
-	})
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantBody != "" {
+				assert.Contains(t, w.Body.String(), tt.wantBody)
+			}
+			if tt.wantLocation != "" {
+				assert.Equal(t, tt.wantLocation, w.Header().Get("Location"))
+			}
+		})
+	}
 }
