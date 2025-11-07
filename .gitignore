@@ -22,4 +22,7 @@ vendor/
 .idea
 .vscode
 .DS_Store
-test_results_increment2.txt
+
+# Test results files for all increments
+test_results*.txt
+test_results*.txt
