@@ -3,9 +3,9 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
-	"fmt"
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +21,11 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	repo := repository.NewMemoryRepository()
 	repo.Clear()
 	cfg := &config.Config{BaseURL: "http://localhost:33675/"}
-	h := NewHandler(repo, cfg)
+
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
+	h := NewHandler(repo, cfg, logger)
 	r := chi.NewRouter()
 	r.Use(middleware.GzipMiddleware)
 	h.SetupRoutes(r)
@@ -31,13 +35,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 
 func TestHandler_ShortenURL(t *testing.T) {
 	t.Run("Valid POST", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
+		r, w, _, _ := setupTest(t)
 		req := httptest.NewRequest("POST", "/", strings.NewReader("https://example.com"))
 		r.ServeHTTP(w, req)
 
@@ -48,29 +46,19 @@ func TestHandler_ShortenURL(t *testing.T) {
 
 func TestHandler_HomeHandler(t *testing.T) {
 	t.Run("Valid GET", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
+		r, w, _, _ := setupTest(t)
 		req := httptest.NewRequest("GET", "/", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), cfg.BaseURL)
+		assert.Contains(t, w.Body.String(), "URL Shortener Service")
+		assert.Contains(t, w.Body.String(), "POST /")
+		assert.Contains(t, w.Body.String(), "GET /{id}")
 	})
 }
 func TestShortenURL_JSON(t *testing.T) {
 	t.Run("Valid POST JSON", func(t *testing.T) {
-		repo := repository.NewMemoryRepository()
-		repo.Clear()
-		cfg := &config.Config{BaseURL: fmt.Sprintf("http://localhost:%d/", 33675)}
-		h := NewHandler(repo, cfg)
-		r := chi.NewRouter()
-		h.SetupRoutes(r)
-		w := httptest.NewRecorder()
+		r, w, _, _ := setupTest(t)
 		req := httptest.NewRequest("POST", "/api/shorten", strings.NewReader("{\"url\":\"https://example.com\"}"))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)

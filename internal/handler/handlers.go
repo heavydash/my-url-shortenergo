@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"go.uber.org/zap"
 	"io"
 	"log"
 	"net/http"
@@ -14,13 +15,19 @@ import (
 )
 
 type Handler struct {
-	repo repository.URLRepository
-	cfg  *config.Config
+	repo   repository.URLRepository
+	cfg    *config.Config
+	logger *zap.Logger
 }
 
-func NewHandler(repo repository.URLRepository, cfg *config.Config) *Handler {
-	return &Handler{repo: repo, cfg: cfg}
-
+func NewHandler(
+	repo repository.URLRepository,
+	cfg *config.Config,
+	logger *zap.Logger) *Handler {
+	return &Handler{
+		repo:   repo,
+		cfg:    cfg,
+		logger: logger}
 }
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
@@ -34,7 +41,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Failed reading body: %v", err)
+		h.logger.Error("Failed reading body: %v", zap.Error(err))
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -46,13 +53,13 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	if isAPI && isJSON {
 		req := model.Request{}
 		if err := req.UnmarshalJSON(body); err != nil {
-			log.Printf("Failed unmarshalling body: %v", err)
+			h.logger.Error("Failed unmarshalling body: %v", zap.Error(err))
 			resp := model.Response{Error: "Invalid JSON body"}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			data, err := resp.MarshalJSON()
 			if err != nil {
-				log.Printf("Failed writing body: %v", err)
+				h.logger.Error("Failed writing body: %v", zap.Error(err))
 				http.Error(w, "Failed writing body", http.StatusInternalServerError)
 				return
 			}
@@ -66,13 +73,13 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 
 	if len(url) == 0 || !strings.HasPrefix(url, "http") {
 		if isAPI && isJSON {
-			log.Printf("Invalid URL: %v", url)
+			h.logger.Info("Invalid URL: %v", zap.String("url", url))
 			resp := model.Response{Error: "Invalid URL"}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			data, err := resp.MarshalJSON()
 			if err != nil {
-				log.Printf("Failed writing body: %v", err)
+				h.logger.Error("Failed writing body: %v", zap.Error(err))
 				http.Error(w, "Failed writing body", http.StatusInternalServerError)
 				return
 			}
@@ -88,7 +95,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 	}
 	savedModel, err := h.repo.SaveURL(urlModel)
 	if err != nil {
-		log.Printf("Failed saving URL: %v", err)
+		h.logger.Error("Failed saving URL: %v", zap.Error(err))
 		if err.Error() == "failed to generate short ID after 10 attempts" {
 			if isAPI && isJSON {
 				resp := model.Response{Error: "Server overloaded, try again later"}
@@ -96,7 +103,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				data, err := resp.MarshalJSON()
 				if err != nil {
-					log.Printf("Failed writing body: %v", err)
+					h.logger.Error("Failed writing body: %v", zap.Error(err))
 					http.Error(w, "Failed writing body", http.StatusInternalServerError)
 					return
 				}
@@ -112,7 +119,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
 				data, err := resp.MarshalJSON()
 				if err != nil {
-					log.Printf("Failed writing body: %v", err)
+					h.logger.Error("Failed writing body: %v", zap.Error(err))
 					http.Error(w, "Failed writing body", http.StatusInternalServerError)
 					return
 				}
@@ -131,7 +138,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		data, err := resp.MarshalJSON()
 		if err != nil {
-			log.Printf("Failed writing body: %v", err)
+			h.logger.Error("Failed writing body: %v", zap.Error(err))
 			http.Error(w, "Failed writing body", http.StatusInternalServerError)
 			return
 		}
@@ -145,7 +152,7 @@ func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
-		log.Printf("Method not allowed: %s", method)
+		h.logger.Info("Method not allowed: %s", zap.String("method", method))
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -154,14 +161,14 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if len(id) == 0 {
-		log.Printf("Error invalid ID: empty")
+		h.logger.Error("Error invalid ID: empty", zap.String("id", id))
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	urlModel, err := h.repo.GetURL(id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			log.Printf("Error finding URL for ID %s: %v", id, err)
+			h.logger.Error("Error finding URL for ID %s: %v", zap.String("id", id), zap.Error(err))
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		} else {
 			log.Printf("Error finding URL for ID %s: %v", id, err)
