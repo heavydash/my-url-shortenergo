@@ -9,14 +9,16 @@ type Config struct {
 	ServerAddr      string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func NewConfig() (*Config, error) {
 
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	a := fs.String("a", ":8080", "address to run HTTP server")
-	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
+	a := fs.String("a", ":8081", "address to run HTTP server")
+	b := fs.String("b", "http://localhost:8081", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
+	d := fs.String("d", "", "DSN to store the URL")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, err
@@ -26,6 +28,7 @@ func NewConfig() (*Config, error) {
 		ServerAddr:      *a,
 		BaseURL:         *b,
 		FileStoragePath: *f,
+		DatabaseDSN:     *d,
 	}
 
 	if addr, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
@@ -36,6 +39,9 @@ func NewConfig() (*Config, error) {
 	}
 	if path, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
 		cfg.FileStoragePath = path
+	}
+	if dsn, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = dsn
 	}
 	return cfg, nil
 }

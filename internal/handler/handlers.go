@@ -31,10 +31,12 @@ func NewHandler(
 }
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
+	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.ShortenURL)
 	r.Post("/api/shorten", h.ShortenURL)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
+
 }
 
 func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
@@ -177,4 +179,14 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, urlModel.OriginalURL, http.StatusTemporaryRedirect)
+}
+func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
+	if err := h.repo.Ping(r.Context()); err != nil {
+		h.logger.Error("DB ping failed", zap.Error(err))
+		http.Error(w, "db ping failed", http.StatusInternalServerError)
+		return
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}
 }

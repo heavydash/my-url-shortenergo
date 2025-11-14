@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"fmt"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -11,6 +12,7 @@ type URLRepository interface {
 	SaveURL(m model.URLModel) (model.URLModel, error)
 	GetURL(id string) (model.URLModel, error)
 	Clear()
+	Ping(ctx context.Context) error
 }
 
 type MemoryRepository struct {
@@ -60,4 +62,8 @@ func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
 func (m *MemoryRepository) Clear() {
 	m.urls = make(map[string]model.URLModel)
 	log.Printf("Cleared Urls, new size: %d", len(m.urls))
+}
+
+func (m *MemoryRepository) Ping(ctx context.Context) error {
+	return nil
 }

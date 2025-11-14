@@ -32,8 +32,8 @@ func TestNewConfig(t *testing.T) {
 
 		cfg, err := NewConfig()
 		require.NoError(t, err)
-		assert.Contains(t, []string{":8080", "localhost:8080"}, cfg.ServerAddr)
-		assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
+		assert.Contains(t, []string{":8081", "localhost:8081"}, cfg.ServerAddr)
+		assert.Equal(t, "http://localhost:8081", cfg.BaseURL)
 	})
 }
 func TestNewConfig_FileStoragePath(t *testing.T) {
