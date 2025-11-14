@@ -184,7 +184,6 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
 		http.Error(w, "db ping failed", http.StatusInternalServerError)
-		return
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
