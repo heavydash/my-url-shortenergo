@@ -15,8 +15,8 @@ type Config struct {
 func NewConfig() (*Config, error) {
 
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
-	a := fs.String("a", ":8081", "address to run HTTP server")
-	b := fs.String("b", "http://localhost:8081", "base URL for shortened links")
+	a := fs.String("a", ":8080", "address to run HTTP server")
+	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
 	d := fs.String("d", "", "DSN to store the URL")
 
