@@ -75,7 +75,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	//Модель
 	m := model.URLModel{
 		UUID:        id,
-		ShortURL:    fmt.Sprintf("%s%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
+		ShortURL:    fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
 		OriginalURL: reqUrl,
 	}
 
