@@ -23,7 +23,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	cfg := &config.Config{BaseURL: "http://localhost:33675/"}
 
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 
 	h := NewHandler(repo, cfg, logger)
 	r := chi.NewRouter()

@@ -26,7 +26,9 @@ func TestFileRepository(t *testing.T) {
 	assert.Equal(t, "http://example.com", got.OriginalURL)
 
 	// Clear
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 	_, err = repo.GetURL(saved.UUID)
 	assert.ErrorContains(t, err, "not found")
 }

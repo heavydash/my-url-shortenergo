@@ -11,7 +11,7 @@ import (
 type URLRepository interface {
 	SaveURL(m model.URLModel) (model.URLModel, error)
 	GetURL(id string) (model.URLModel, error)
-	Clear()
+	Clear() error
 	Ping(ctx context.Context) error
 }
 
@@ -59,9 +59,10 @@ func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
-func (m *MemoryRepository) Clear() {
+func (m *MemoryRepository) Clear() error {
 	m.urls = make(map[string]model.URLModel)
 	log.Printf("Cleared Urls, new size: %d", len(m.urls))
+	return nil
 }
 
 func (m *MemoryRepository) Ping(ctx context.Context) error {

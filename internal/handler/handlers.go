@@ -126,11 +126,16 @@ func (h *Handler) sendSuccess(w http.ResponseWriter, isJSON bool, shortURL strin
 		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
-	} else {
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(shortURL))
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			h.logger.Error("json encode failed", zap.Error(err))
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusCreated)
+	if _, err := w.Write([]byte(shortURL)); err != nil {
+		h.logger.Error("write failed", zap.Error(err))
 	}
 }
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
@@ -150,7 +155,9 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Write([]byte("URL Shortener Service - Use POST / to shorten and GET /{id} to redirect"))
+	if _, err := w.Write([]byte("URL Shortener Service - Use POST / to shorten and GET /{id} to redirect")); err != nil {
+		h.logger.Error("Write home message failed", zap.Error(err))
+	}
 }
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -179,5 +186,7 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
+	if _, err := w.Write([]byte("OK")); err != nil {
+		h.logger.Error("writestring failed", zap.Error(err))
+	}
 }

@@ -72,11 +72,17 @@ func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
-func (r *FileRepository) Clear() {
-	r.file.Truncate(0)
-	r.file.Seek(0, 0)
-	clear(r.urls)
+func (r *FileRepository) Clear() error {
+	if err := r.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := r.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	r.urls = make(map[string]model.URLModel)
+	return nil
 }
+
 func (r *FileRepository) Ping(ctx context.Context) error {
 	return nil
 }

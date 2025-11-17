@@ -42,8 +42,11 @@ func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	return m, nil
 }
 
-func (r *PostgresRepository) Clear() {
-	r.Pool.Exec(context.Background(), "TRUNCATE TABLE urls")
+func (r *PostgresRepository) Clear() error {
+	if _, err := r.Pool.Exec(context.Background(), "TRUNCATE TABLE urls"); err != nil {
+		return err
+	}
+	return nil
 }
 func (r *PostgresRepository) Ping(ctx context.Context) error {
 	return r.Pool.Ping(ctx)

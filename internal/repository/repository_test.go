@@ -9,7 +9,9 @@ import (
 
 func TestMemoryRepository_SaveURL(t *testing.T) {
 	repo := NewMemoryRepository()
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 
 	tests := []struct {
 		name    string
@@ -38,7 +40,9 @@ func TestMemoryRepository_SaveURL(t *testing.T) {
 }
 func TestMemoryRepository_GetURL_NotFound(t *testing.T) {
 	repo := NewMemoryRepository()
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 
 	_, err := repo.GetURL("nonexistent")
 	require.Error(t, err)
@@ -47,7 +51,9 @@ func TestMemoryRepository_GetURL_NotFound(t *testing.T) {
 
 func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 	repo := NewMemoryRepository()
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 
 	modelanother := model.URLModel{UUID: "testid", OriginalURL: "http://example.com"}
 	_, err := repo.SaveURL(modelanother)
@@ -63,7 +69,9 @@ func TestMemoryRepository_Clear(t *testing.T) {
 	model1 := model.URLModel{OriginalURL: "http://example.com"}
 	savedModel, err := repo.SaveURL(model1)
 	require.NoError(t, err)
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 	_, err = repo.GetURL(savedModel.UUID)
 	assert.Error(t, err)
 }

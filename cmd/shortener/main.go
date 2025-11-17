@@ -24,7 +24,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			log.Printf("logger sync error: %v", err)
+		}
+	}()
 
 	repo := repository.New(cfg, logger)
 
