@@ -1,16 +1,19 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"go.uber.org/zap"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
@@ -32,126 +35,115 @@ func NewHandler(
 
 func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Get("/ping", h.PingHandler)
-	r.Post("/", h.ShortenURL)
-	r.Post("/api/shorten", h.ShortenURL)
+	r.Post("/", h.ShortenPlainHandler)
+	r.Post("/api/shorten", h.ShortenJSONHandler)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
 
 }
 
-func (h *Handler) ShortenURL(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
+func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
+	h.ShortenHandler(w, r, true)
+}
+
+func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
+	h.ShortenHandler(w, r, false)
+}
+
+func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
+
+	//Парсинг запроса
+	reqUrl, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
-		h.logger.Error("Failed reading body: %v", zap.Error(err))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	var url string
 
-	isAPI := strings.HasPrefix(r.URL.Path, "/api/shorten")
-	isJSON := strings.Contains(r.Header.Get("Content-Type"), "application/json")
-
-	if isAPI && isJSON {
-		req := model.Request{}
-		if err := req.UnmarshalJSON(body); err != nil {
-			h.logger.Error("Failed unmarshalling body: %v", zap.Error(err))
-			resp := model.Response{Error: "Invalid JSON body"}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			data, err := resp.MarshalJSON()
-			if err != nil {
-				h.logger.Error("Failed writing body: %v", zap.Error(err))
-				http.Error(w, "Failed writing body", http.StatusInternalServerError)
-				return
-			}
-			w.Write(data)
-			return
-		}
-		url = req.URL
-	} else {
-		url = string(body)
+	//Валидация URL
+	if !h.isValidURL(reqUrl) {
+		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
+		return
 	}
 
-	if len(url) == 0 || !strings.HasPrefix(url, "http") {
-		if isAPI && isJSON {
-			h.logger.Info("Invalid URL: %v", zap.String("url", url))
-			resp := model.Response{Error: "Invalid URL"}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			data, err := resp.MarshalJSON()
-			if err != nil {
-				h.logger.Error("Failed writing body: %v", zap.Error(err))
-				http.Error(w, "Failed writing body", http.StatusInternalServerError)
-				return
-			}
-			w.Write(data)
-			return
-		} else {
-			http.Error(w, "Invalid URL", http.StatusBadRequest)
-			return
-		}
+	//Генерация ID
+	id, err := idgen.IDGen()
+	if err != nil || id == "" {
+		h.logger.Error("Failed to generate ID", zap.Error(err))
+		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
-	urlModel := model.URLModel{
-		OriginalURL: url,
+	//Модель
+	m := model.URLModel{
+		UUID:        id,
+		ShortURL:    fmt.Sprintf("%s%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
+		OriginalURL: reqUrl,
 	}
-	savedModel, err := h.repo.SaveURL(urlModel)
+
+	//Сохранение
+	saved, err := h.repo.SaveURL(m)
 	if err != nil {
-		h.logger.Error("Failed saving URL: %v", zap.Error(err))
-		if err.Error() == "failed to generate short ID after 10 attempts" {
-			if isAPI && isJSON {
-				resp := model.Response{Error: "Server overloaded, try again later"}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusServiceUnavailable)
-				data, err := resp.MarshalJSON()
-				if err != nil {
-					h.logger.Error("Failed writing body: %v", zap.Error(err))
-					http.Error(w, "Failed writing body", http.StatusInternalServerError)
-					return
-				}
-				w.Write(data)
-			} else {
-				http.Error(w, "Server overloaded, try again later", http.StatusServiceUnavailable)
-				return
-			}
-		} else {
-			if isAPI && isJSON {
-				resp := model.Response{Error: "Internal server error"}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				data, err := resp.MarshalJSON()
-				if err != nil {
-					h.logger.Error("Failed writing body: %v", zap.Error(err))
-					http.Error(w, "Failed writing body", http.StatusInternalServerError)
-					return
-				}
-				w.Write(data)
-				return
-			} else {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
+		h.logger.Error("Failed to save URL", zap.Error(err))
+		status := http.StatusInternalServerError
+		msg := "Internal Server Error"
+		if strings.Contains(err.Error(), "collision") {
+			status = http.StatusServiceUnavailable
+			msg = "Service overloaded, try again later"
 		}
+		h.sendError(w, isJSON, msg, status)
+		return
 	}
-	shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), savedModel.UUID)
-	if isAPI && isJSON {
+	//Отправка ответа
+	h.sendSuccess(w, isJSON, saved.ShortURL)
+}
+
+func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error("Failed to read body", zap.Error(err))
+		return "", err
+	}
+	defer r.Body.Close()
+	if isJSON {
+		req := model.Request{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			return "", err
+		}
+		return req.URL, nil
+	}
+	return string(body), nil
+}
+
+func (h *Handler) isValidURL(u string) bool {
+	if u == "" || (!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://")) {
+		return false
+	}
+	_, err := url.ParseRequestURI(u)
+	return err == nil
+}
+
+func (h *Handler) sendSuccess(w http.ResponseWriter, isJSON bool, shortURL string) {
+	if isJSON {
 		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		data, err := resp.MarshalJSON()
-		if err != nil {
-			h.logger.Error("Failed writing body: %v", zap.Error(err))
-			http.Error(w, "Failed writing body", http.StatusInternalServerError)
-			return
-		}
-		w.Write(data)
-		return
+		json.NewEncoder(w).Encode(resp)
 	} else {
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(shortURL))
 	}
 }
+func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
+	if isJSON {
+		resp := model.Response{Error: msg}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(resp)
+	} else {
+		http.Error(w, msg, status)
+	}
+}
+
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
 		h.logger.Info("Method not allowed: %s", zap.String("method", method))
@@ -184,8 +176,8 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
 		http.Error(w, "db ping failed", http.StatusInternalServerError)
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		return
 	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }

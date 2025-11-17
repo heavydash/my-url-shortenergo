@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"go.uber.org/zap"

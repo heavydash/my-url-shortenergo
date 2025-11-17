@@ -1,5 +1,3 @@
-package migrations
-
 CREATE TABLE IF NOT EXISTS urls (
 uuid         TEXT PRIMARY KEY,
 short_url    TEXT UNIQUE NOT NULL,
