@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
@@ -43,12 +44,9 @@ func main() {
 		Addr:    cfg.ServerAddr,
 		Handler: r}
 
-	go func() {
-		logger.Info("starting server", zap.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("failed to start server", zap.Error(err))
-		}
-	}()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal("failed to start server", zap.Error(err))
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)

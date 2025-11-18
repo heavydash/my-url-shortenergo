@@ -50,7 +50,10 @@ func (r *FileRepository) loadFromFile() {
 
 func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	if url.UUID == "" {
-		id, _ := idgen.IDGen()
+		id, err := idgen.IDGen()
+		if err != nil {
+			return url, err
+		}
 		url.UUID = id
 		url.ShortURL = id
 	}
@@ -60,11 +63,12 @@ func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	if err := r.encoder.Encode(url); err != nil {
 		return url, err
 	}
-	r.file.Write([]byte("\n"))
+	if _, err := r.file.Write([]byte("\n")); err != nil {
+		return url, err
+	}
 	r.urls[url.UUID] = url
 	return url, nil
 }
-
 func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
 	if url, ok := r.urls[id]; ok {
 		return url, nil

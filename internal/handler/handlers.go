@@ -53,14 +53,14 @@ func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
 
 	//Парсинг запроса
-	reqUrl, err := h.parseRequestBody(r, isJSON)
+	reqURL, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
 	//Валидация URL
-	if !h.isValidURL(reqUrl) {
+	if !h.isValidURL(reqURL) {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
@@ -76,7 +76,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	m := model.URLModel{
 		UUID:        id,
 		ShortURL:    fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
-		OriginalURL: reqUrl,
+		OriginalURL: reqURL,
 	}
 
 	//Сохранение

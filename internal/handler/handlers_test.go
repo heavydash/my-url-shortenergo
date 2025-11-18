@@ -19,7 +19,9 @@ import (
 
 func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
 	repo := repository.NewMemoryRepository()
-	repo.Clear()
+	if err := repo.Clear(); err != nil {
+		t.Fatalf("Clear failed: %v", err)
+	}
 	cfg := &config.Config{BaseURL: "http://localhost:33675/"}
 
 	logger, _ := zap.NewProduction()
