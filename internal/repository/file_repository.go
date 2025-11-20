@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
 type FileRepository struct {
+	mu      sync.RWMutex
 	file    *os.File
 	encoder *json.Encoder
 	urls    map[string]model.URLModel
@@ -48,7 +50,9 @@ func (r *FileRepository) loadFromFile() {
 	}
 }
 
-func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
+func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model.URLModel, error) {
+	r.mu.Lock()
+	r.mu.Unlock()
 	if url.UUID == "" {
 		id, err := idgen.IDGen()
 		if err != nil {
@@ -69,14 +73,34 @@ func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	r.urls[url.UUID] = url
 	return url, nil
 }
-func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
+func (r *FileRepository) GetURL(ctx context.Context, id string) (model.URLModel, error) {
+	r.mu.RLock()
+	r.mu.RUnlock()
 	if url, ok := r.urls[id]; ok {
 		return url, nil
 	}
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
+func (r *FileRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, m := range batch {
+		if err := r.encoder.Encode(m); err != nil {
+			return err
+		}
+		if _, err := r.file.Write([]byte("\n")); err != nil {
+			return err
+		}
+		r.urls[m.UUID] = m
+	}
+	return nil
+}
+
 func (r *FileRepository) Clear() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.file.Truncate(0); err != nil {
 		return err
 	}
@@ -88,5 +112,7 @@ func (r *FileRepository) Clear() error {
 }
 
 func (r *FileRepository) Ping(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return nil
 }

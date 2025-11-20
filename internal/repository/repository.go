@@ -6,16 +6,19 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"log"
+	"sync"
 )
 
 type URLRepository interface {
-	SaveURL(m model.URLModel) (model.URLModel, error)
-	GetURL(id string) (model.URLModel, error)
+	SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error)
+	GetURL(ctx context.Context, id string) (model.URLModel, error)
+	SaveBatch(ctx context.Context, batch []model.URLModel) error
 	Clear() error
 	Ping(ctx context.Context) error
 }
 
 type MemoryRepository struct {
+	mu   sync.Mutex
 	urls map[string]model.URLModel
 }
 
@@ -25,7 +28,10 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
+func (m *MemoryRepository) SaveURL(ctx context.Context, model model.URLModel) (model.URLModel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	newModel := model
 	if newModel.UUID != "" {
 		if _, ok := m.urls[newModel.UUID]; ok {
@@ -52,19 +58,35 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 	return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
 }
 
-func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
+func (m *MemoryRepository) GetURL(ctx context.Context, id string) (model.URLModel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.urls[id]; ok {
 		return m.urls[id], nil
 	}
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
+func (m *MemoryRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, item := range batch {
+		m.urls[item.UUID] = item
+	}
+	return nil
+}
+
 func (m *MemoryRepository) Clear() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.urls = make(map[string]model.URLModel)
 	log.Printf("Cleared Urls, new size: %d", len(m.urls))
 	return nil
 }
 
 func (m *MemoryRepository) Ping(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return nil
 }
