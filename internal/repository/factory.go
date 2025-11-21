@@ -13,15 +13,24 @@ import (
 
 func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 	if cfg.DatabaseDSN != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		// Контекст для подключения
+		ctxConnect, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		pool, err := pgxpool.New(ctx, cfg.DatabaseDSN)
+		pool, err := pgxpool.New(ctxConnect, cfg.DatabaseDSN)
 		if err != nil {
 			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
 		} else {
-			//Создаем таблицу
-			_, err = pool.Exec(ctx, `
+			// Контекст для создания таблицы или миграций
+			ctxInit, cancelInit := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelInit()
+			// Проверка Ты жива?
+			if err := pool.Ping(ctxInit); err != nil {
+				logger.Error("failed to ping db, falling back", zap.Error(err))
+				pool.Close()
+			} else {
+				//Создаем таблицу
+				_, err = pool.Exec(ctxInit, `
     CREATE TABLE IF NOT EXISTS urls (
         uuid TEXT PRIMARY KEY,
         short_url TEXT UNIQUE NOT NULL,
@@ -29,15 +38,17 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
         user_id TEXT
     )
 `)
-			if err != nil {
-				logger.Error("failed to create table, falling back", zap.Error(err))
-				pool.Close()
-			} else {
-				logger.Info("using postgres storage")
-				return NewPostgres(pool)
+				if err != nil {
+					logger.Error("failed to create table, falling back", zap.Error(err))
+					pool.Close()
+				} else {
+					logger.Info("using postgres storage")
+					return NewPostgres(pool)
+				}
 			}
 		}
 	}
+	// Fallback
 	if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
 		return NewFileRepository(cfg.FileStoragePath)
