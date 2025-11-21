@@ -20,24 +20,27 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 		if err != nil {
 			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
 		} else {
-			// Создаём таблицу вручную
-			_, err = pool.Exec(context.Background(), `
-            CREATE TABLE IF NOT EXISTS urls (
-                uuid TEXT PRIMARY KEY,
-                short_url TEXT UNIQUE NOT NULL,
-                original_url TEXT NOT NULL,
-                user_id TEXT
-            )
-        `)
+			_, err = pool.Exec(ctx, `
+    CREATE TABLE IF NOT EXISTS urls (
+        uuid TEXT PRIMARY KEY,
+        short_url TEXT UNIQUE NOT NULL,
+        original_url TEXT NOT NULL,
+        user_id TEXT
+    )
+`)
 			if err != nil {
-				logger.Error("failed to create table", zap.Error(err))
+				logger.Error("failed to create table, falling back", zap.Error(err))
+				pool.Close()
 			} else {
+				logger.Info("using postgres storage")
 				return NewPostgres(pool)
 			}
 		}
 	}
 	if cfg.FileStoragePath != "" {
+		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
 		return NewFileRepository(cfg.FileStoragePath)
 	}
+	logger.Info("using in-memory storage")
 	return NewMemoryRepository()
 }

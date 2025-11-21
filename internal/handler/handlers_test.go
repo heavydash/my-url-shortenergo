@@ -20,7 +20,6 @@ import (
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
-	_ "github.com/heavydash/my-url-shortenergo/internal/repository/mocks"
 	"github.com/stretchr/testify/assert"
 )
 

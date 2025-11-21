@@ -9,7 +9,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresRepository struct {
