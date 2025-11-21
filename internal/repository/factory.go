@@ -13,13 +13,14 @@ import (
 
 func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 	if cfg.DatabaseDSN != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
 		pool, err := pgxpool.New(ctx, cfg.DatabaseDSN)
 		if err != nil {
 			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
 		} else {
+			//Создаем таблицу
 			_, err = pool.Exec(ctx, `
     CREATE TABLE IF NOT EXISTS urls (
         uuid TEXT PRIMARY KEY,
