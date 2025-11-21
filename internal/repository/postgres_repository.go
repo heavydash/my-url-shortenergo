@@ -4,37 +4,39 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
+	"sync"
+
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/pgxpool"
-	"sync"
 )
 
 type PostgresRepository struct {
 	mu   sync.Mutex
-	Pool *db.Pool
+	Pool *pgxpool.Pool
 }
 
-func NewPostgres(pool *db.Pool) *PostgresRepository {
+func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{Pool: pool}
 }
 
-func (r *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
+func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	r.mu.Lock()
 	defer r.mu.Lock()
+
 	query := `
-    INSERT INTO urls (uuid, short_url, original_url)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (uuid) DO UPDATE SET
+    	INSERT INTO urls (uuid, short_url, original_url)
+    	VALUES ($1, $2, $3)
+    	ON CONFLICT (uuid) DO UPDATE SET
       short_url = EXCLUDED.short_url,
       original_url = EXCLUDED.original_url
-  `
+  		`
 	_, err := r.Pool.Exec(context.Background(), query, m.UUID, m.ShortURL, m.OriginalURL)
 	return m, err
 }
 
-func (r *PostgresRepository) GetURL(ctx context.Context, id string) (model.URLModel, error) {
+func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -53,6 +55,7 @@ func (r *PostgresRepository) GetURL(ctx context.Context, id string) (model.URLMo
 func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	tx, err := r.Pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err

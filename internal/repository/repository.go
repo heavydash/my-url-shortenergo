@@ -3,15 +3,17 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"log"
 	"sync"
+
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
+//go:generate mockgen -source=$GOFILE -destination=../repository/mocks/mock_repository.go -package=mocks
 type URLRepository interface {
-	SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error)
-	GetURL(ctx context.Context, id string) (model.URLModel, error)
+	SaveURL(m model.URLModel) (model.URLModel, error)
+	GetURL(id string) (model.URLModel, error)
 	SaveBatch(ctx context.Context, batch []model.URLModel) error
 	Clear() error
 	Ping(ctx context.Context) error
@@ -28,7 +30,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (m *MemoryRepository) SaveURL(ctx context.Context, model model.URLModel) (model.URLModel, error) {
+func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -58,7 +60,7 @@ func (m *MemoryRepository) SaveURL(ctx context.Context, model model.URLModel) (m
 	return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
 }
 
-func (m *MemoryRepository) GetURL(ctx context.Context, id string) (model.URLModel, error) {
+func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.urls[id]; ok {
@@ -67,7 +69,7 @@ func (m *MemoryRepository) GetURL(ctx context.Context, id string) (model.URLMode
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
-func (m *MemoryRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+func (m *MemoryRepository) SaveBatch(сtx context.Context, batch []model.URLModel) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

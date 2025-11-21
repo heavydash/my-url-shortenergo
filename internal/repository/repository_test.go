@@ -1,11 +1,11 @@
 package repository
 
 import (
-	"context"
+	"testing"
+
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestMemoryRepository_SaveURL(t *testing.T) {
@@ -24,7 +24,7 @@ func TestMemoryRepository_SaveURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			saved, err := repo.SaveURL(context.Background(), tt.model)
+			saved, err := repo.SaveURL(tt.model)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -33,7 +33,7 @@ func TestMemoryRepository_SaveURL(t *testing.T) {
 			assert.NotEmpty(t, saved.UUID)
 			assert.Equal(t, tt.model.OriginalURL, saved.OriginalURL)
 
-			got, err := repo.GetURL(context.Background(), saved.UUID)
+			got, err := repo.GetURL(saved.UUID)
 			require.NoError(t, err)
 			assert.Equal(t, saved.UUID, got.UUID)
 		})
@@ -45,7 +45,7 @@ func TestMemoryRepository_GetURL_NotFound(t *testing.T) {
 		t.Fatalf("Clear failed: %v", err)
 	}
 
-	_, err := repo.GetURL(context.Background(), "nonexistent")
+	_, err := repo.GetURL("nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -57,10 +57,10 @@ func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 	}
 
 	modelanother := model.URLModel{UUID: "testid", OriginalURL: "http://example.com"}
-	_, err := repo.SaveURL(context.Background(), modelanother)
+	_, err := repo.SaveURL(modelanother)
 	require.NoError(t, err)
 
-	_, err = repo.SaveURL(context.Background(), modelanother)
+	_, err = repo.SaveURL(modelanother)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
 }
@@ -68,11 +68,11 @@ func TestMemoryRepository_SaveURL_ExistingID(t *testing.T) {
 func TestMemoryRepository_Clear(t *testing.T) {
 	repo := NewMemoryRepository()
 	model1 := model.URLModel{OriginalURL: "http://example.com"}
-	savedModel, err := repo.SaveURL(context.Background(), model1)
+	savedModel, err := repo.SaveURL(model1)
 	require.NoError(t, err)
 	if err := repo.Clear(); err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
-	_, err = repo.GetURL(context.Background(), savedModel.UUID)
+	_, err = repo.GetURL(savedModel.UUID)
 	assert.Error(t, err)
 }

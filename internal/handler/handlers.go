@@ -3,15 +3,16 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"go.uber.org/zap"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
+	"go.uber.org/zap"
 
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
@@ -39,7 +40,6 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Post("/api/shorten", h.ShortenJSONHandler)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
-	r.Post("/api/shorten/batch", h.BatchShortenHandler)
 
 }
 
@@ -52,21 +52,21 @@ func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
-	ctx := r.Context()
-	// Парсинг запроса
+
+	//Парсинг запроса
 	reqURL, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	// Валидация URL
+	//Валидация URL
 	if !h.isValidURL(reqURL) {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	// Генерация ID
+	//Генерация ID
 	id, err := idgen.IDGen()
 	if err != nil || id == "" {
 		h.logger.Error("Failed to generate ID", zap.Error(err))
@@ -81,7 +81,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	}
 
 	//Сохранение
-	saved, err := h.repo.SaveURL(ctx, m)
+	saved, err := h.repo.SaveURL(m)
 	if err != nil {
 		h.logger.Error("Failed to save URL", zap.Error(err))
 		status := http.StatusInternalServerError
@@ -161,14 +161,13 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	id := chi.URLParam(r, "id")
 	if len(id) == 0 {
 		h.logger.Error("Error invalid ID: empty", zap.String("id", id))
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	urlModel, err := h.repo.GetURL(ctx, id)
+	urlModel, err := h.repo.GetURL(id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.logger.Error("Error finding URL for ID %s: %v", zap.String("id", id), zap.Error(err))
@@ -192,7 +191,6 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("writestring failed", zap.Error(err))
 	}
 }
-
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

@@ -50,9 +50,10 @@ func (r *FileRepository) loadFromFile() {
 	}
 }
 
-func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model.URLModel, error) {
+func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	r.mu.Lock()
-	r.mu.Unlock()
+	// Защита от race condition при параллельном доступе
+	defer r.mu.Unlock()
 	if url.UUID == "" {
 		id, err := idgen.IDGen()
 		if err != nil {
@@ -73,9 +74,10 @@ func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model
 	r.urls[url.UUID] = url
 	return url, nil
 }
-func (r *FileRepository) GetURL(ctx context.Context, id string) (model.URLModel, error) {
+func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
 	r.mu.RLock()
-	r.mu.RUnlock()
+	// Защита от race condition при параллельном доступе
+	defer r.mu.RUnlock()
 	if url, ok := r.urls[id]; ok {
 		return url, nil
 	}
@@ -84,6 +86,7 @@ func (r *FileRepository) GetURL(ctx context.Context, id string) (model.URLModel,
 
 func (r *FileRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 	r.mu.Lock()
+	// Защита от race condition при параллельном доступе
 	defer r.mu.Unlock()
 
 	for _, m := range batch {
@@ -100,6 +103,7 @@ func (r *FileRepository) SaveBatch(ctx context.Context, batch []model.URLModel) 
 
 func (r *FileRepository) Clear() error {
 	r.mu.Lock()
+	// Защита от race condition при параллельном доступе
 	defer r.mu.Unlock()
 	if err := r.file.Truncate(0); err != nil {
 		return err
@@ -113,6 +117,7 @@ func (r *FileRepository) Clear() error {
 
 func (r *FileRepository) Ping(ctx context.Context) error {
 	r.mu.Lock()
+	// Защита от race condition при параллельном доступе
 	defer r.mu.Unlock()
 	return nil
 }

@@ -12,7 +12,7 @@ type Pool struct {
 }
 
 // Create pool
-func New(ctx context.Context, dsn string) (*Pool, error) {
+func NewPool(ctx context.Context, dsn string) (*Pool, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
@@ -30,12 +30,12 @@ func New(ctx context.Context, dsn string) (*Pool, error) {
 	}
 
 	//Проверка
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	/*pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := pool.Ping(pingCtx); err != nil {
 		pool.Close()
 		return nil, err
-	}
+	}*/
 	return &Pool{Pool: pool}, nil
 }
 

@@ -3,16 +3,17 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"go.uber.org/zap"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func main() {
 		}
 	}()
 
-	repo := repository.New(cfg, logger)
+	repo := repository.NewFactory(cfg, logger)
 
 	h := handler.NewHandler(repo, cfg, logger)
 
