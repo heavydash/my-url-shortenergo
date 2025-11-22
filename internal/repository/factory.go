@@ -20,6 +20,8 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 		pool, err := pgxpool.New(ctxConnect, cfg.DatabaseDSN)
 		if err != nil {
 			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
+		} else {
+			logger.Info("using postgres storage")
 			return NewPostgres(pool)
 		}
 	}

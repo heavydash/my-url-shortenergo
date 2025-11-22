@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: praktikum
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: praktikum
+    ports:
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praktikum -d praktikum"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate:latest
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - "-path"
+      - "/migrations"
+      - "-database"
+      - "postgres://praktikum:12345@postgres:5432/praktikum?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  shortener:
+    image: alpine:latest
+    platform: linux/arm64
+    working_dir: /app
+    command: ["/app/shortener"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_DSN: postgres://praktikum:12345@postgres:5432/praktikum?sslmode=disable
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
