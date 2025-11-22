@@ -38,6 +38,7 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.ShortenPlainHandler)
 	r.Post("/api/shorten", h.ShortenJSONHandler)
+	r.Post("/api/shorten/batch", h.BatchShortenHandler)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
 

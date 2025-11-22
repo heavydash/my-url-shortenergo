@@ -12,8 +12,25 @@ import (
 )
 
 type PostgresRepository struct {
-	mu   sync.Mutex
-	Pool *pgxpool.Pool
+	mu      sync.Mutex
+	Pool    *pgxpool.Pool
+	once    sync.Once
+	initErr error
+}
+
+func (r *PostgresRepository) ensureInitialized(ctx context.Context) error {
+	r.once.Do(func() {
+		_, err := r.Pool.Exec(ctx, `
+            CREATE TABLE IF NOT EXISTS urls (
+                uuid TEXT PRIMARY KEY,
+                short_url TEXT UNIQUE NOT NULL,
+                original_url TEXT NOT NULL,
+                user_id TEXT
+            )
+        `)
+		r.initErr = err
+	})
+	return r.initErr
 }
 
 func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {

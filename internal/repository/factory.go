@@ -20,34 +20,10 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 		pool, err := pgxpool.New(ctxConnect, cfg.DatabaseDSN)
 		if err != nil {
 			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
-		} else {
-			// Контекст для создания таблицы или миграций
-			ctxInit, cancelInit := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancelInit()
-			// Проверка Ты жива?
-			if err := pool.Ping(ctxInit); err != nil {
-				logger.Error("failed to ping db, falling back", zap.Error(err))
-				pool.Close()
-			} else {
-				//Создаем таблицу
-				_, err = pool.Exec(ctxInit, `
-    CREATE TABLE IF NOT EXISTS urls (
-        uuid TEXT PRIMARY KEY,
-        short_url TEXT UNIQUE NOT NULL,
-        original_url TEXT NOT NULL,
-        user_id TEXT
-    )
-`)
-				if err != nil {
-					logger.Error("failed to create table, falling back", zap.Error(err))
-					pool.Close()
-				} else {
-					logger.Info("using postgres storage")
-					return NewPostgres(pool)
-				}
-			}
+			return NewPostgres(pool)
 		}
 	}
+
 	// Fallback
 	if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
