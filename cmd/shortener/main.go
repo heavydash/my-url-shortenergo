@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
@@ -22,18 +23,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	logger, err := zap.NewProduction()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			log.Printf("logger sync error: %v", err)
-		}
-	}()
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
 
 	repo := repository.NewFactory(cfg, logger)
-
 	h := handler.NewHandler(repo, cfg, logger)
 
 	r := chi.NewRouter()
@@ -45,24 +38,21 @@ func main() {
 		Addr:    cfg.ServerAddr,
 		Handler: r}
 
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Fatal("failed to start server", zap.Error(err))
-	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Fatal("failed to start server", zap.Error(err))
+		}
+	}()
+
+	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
-	logger.Info("shutting down server")
 
-	if err := srv.Shutdown(context.Background()); err != nil {
-		logger.Fatal("failed to shutdown server", zap.Error(err))
-	} else {
-		logger.Info("server stopped")
-	}
-
-	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
-		pgRepo.Pool.Close()
-		logger.Info("postgres pool closed")
-	}
-
+	logger.Info("shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	srv.Shutdown(ctx)
+	logger.Info("server stopped")
 }

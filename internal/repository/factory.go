@@ -4,33 +4,30 @@ import (
 	"context"
 	"time"
 
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"go.uber.org/zap"
 )
 
 func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 	if cfg.DatabaseDSN != "" {
-		// Контекст для подключения
-		ctxConnect, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		pool, err := pgxpool.New(ctxConnect, cfg.DatabaseDSN)
+		pool, err := db.New(ctx, cfg.DatabaseDSN)
 		if err != nil {
-			logger.Warn("postgres unavailable, using file storage", zap.Error(err))
+			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
 		} else {
 			logger.Info("using postgres storage")
-			return NewPostgres(pool)
+			return NewPostgres(pool.Pool)
 		}
 	}
 
-	// Fallback
 	if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
 		return NewFileRepository(cfg.FileStoragePath)
 	}
+
 	logger.Info("using in-memory storage")
 	return NewMemoryRepository()
 }
