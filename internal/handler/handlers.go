@@ -195,6 +195,11 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok || userID == "" {
+		userID = "anonymous"
+	}
+
 	if r.Method != http.MethodPost {
 		h.sendError(w, true, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -243,8 +248,9 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 
 		batchModels = append(batchModels, model.URLModel{
 			UUID:        id,
-			ShortURL:    shortURL,
+			ShortURL:    id,
 			OriginalURL: item.OriginalURL,
+			UserID:      userID,
 		})
 
 		respMap[item.CorrelationID] = shortURL
