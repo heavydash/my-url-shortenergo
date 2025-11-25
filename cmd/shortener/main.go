@@ -24,19 +24,21 @@ func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal(err)
+	} else {
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "http://localhost:8080"
+		}
 	}
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		if cfg.DatabaseDSN == "" {
-			logger.Fatal("DATABASE_DSN required for migrations")
-		}
 		if err := runMigrations(cfg.DatabaseDSN, logger); err != nil {
 			logger.Fatal("migration failed", zap.Error(err))
 		}
-		logger.Info("migrations applied, starting server...")
+		logger.Info("migrations applied successfully")
+		os.Exit(0)
 	}
 
 	repo := repository.NewFactory(cfg, logger)
