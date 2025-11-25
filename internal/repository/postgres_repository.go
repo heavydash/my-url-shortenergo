@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -41,17 +42,36 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	if err := r.initTable(context.Background()); err != nil {
 		return model.URLModel{}, err
 	}
+	var existingShortURL string
+	err := r.pool.QueryRow(context.Background(), `
+SELECT short_url FROM urls WHERE original_url=$1
+`, m.OriginalURL).Scan(&existingShortURL)
 
-	query := `
-		INSERT INTO urls (uuid, short_url, original_url, user_id)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (uuid) DO UPDATE SET
-			short_url = EXCLUDED.short_url,
-			original_url = EXCLUDED.original_url,
-			user_id = EXCLUDED.user_id
-	`
-	_, err := r.pool.Exec(context.Background(), query, m.UUID, m.ShortURL, m.OriginalURL, m.UUID)
-	return m, err
+	if err == nil {
+		// Дубликат
+		m.ShortURL = existingShortURL
+		m.StatusCode = http.StatusConflict
+		return m, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return model.URLModel{}, err
+	}
+
+	// Новая запись
+	_, err = r.pool.Exec(context.Background(), `
+INSERT INTO urls (uuid, short_url, original_url, user_id)
+VALUES ($1, $2, $3, $4)
+`,
+		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
+	)
+
+	if err != nil {
+		return model.URLModel{}, err
+	}
+
+	m.StatusCode = http.StatusCreated
+	return m, nil
 }
 
 func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {

@@ -74,30 +74,31 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok || userID == "" {
+		userID = "anonymous"
+	}
 	//Модель
 	m := model.URLModel{
 		UUID:        id,
 		ShortURL:    fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
 		OriginalURL: reqURL,
+		UserID:      userID,
 	}
 
 	//Сохранение
 	saved, err := h.repo.SaveURL(m)
 	if err != nil {
-		h.logger.Error("Failed to save URL", zap.Error(err))
-		status := http.StatusInternalServerError
-		msg := "Internal Server Error"
-		if strings.Contains(err.Error(), "collision") {
-			status = http.StatusServiceUnavailable
-			msg = "Service overloaded, try again later"
-		}
-		h.sendError(w, isJSON, msg, status)
+		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	//Отправка ответа
+	if saved.StatusCode == http.StatusConflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	h.sendSuccess(w, isJSON, saved.ShortURL)
 }
-
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {

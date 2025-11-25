@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"github.com/pressly/goose/v3"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 )
 
@@ -25,6 +28,16 @@ func main() {
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if cfg.DatabaseDSN == "" {
+			logger.Fatal("DATABASE_DSN required for migrations")
+		}
+		if err := runMigrations(cfg.DatabaseDSN, logger); err != nil {
+			logger.Fatal("migration failed", zap.Error(err))
+		}
+		logger.Info("migrations applied, starting server...")
+	}
 
 	repo := repository.NewFactory(cfg, logger)
 	h := handler.NewHandler(repo, cfg, logger)
@@ -55,4 +68,18 @@ func main() {
 	defer cancel()
 	srv.Shutdown(ctx)
 	logger.Info("server stopped")
+}
+
+func runMigrations(dsn string, logger *zap.Logger) error {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if err = db.Ping(); err != nil {
+		return err
+	}
+
+	return goose.Up(db, "migrations")
 }
