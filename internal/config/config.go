@@ -31,16 +31,16 @@ func NewConfig() (*Config, error) {
 		DatabaseDSN:     *d,
 	}
 
-	if addr, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
+	if addr, ok := os.LookupEnv("SERVER_ADDRESS"); ok && addr != "" {
 		cfg.ServerAddr = addr
 	}
-	if base, ok := os.LookupEnv("BASE_URL"); ok {
+	if base, ok := os.LookupEnv("BASE_URL"); ok && base != "" {
 		cfg.BaseURL = base
 	}
-	if path, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+	if path, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok && path != "" {
 		cfg.FileStoragePath = path
 	}
-	if dsn, ok := os.LookupEnv("DATABASE_DSN"); ok {
+	if dsn, ok := os.LookupEnv("DATABASE_DSN"); ok && dsn != "" {
 		cfg.DatabaseDSN = dsn
 	}
 	return cfg, nil

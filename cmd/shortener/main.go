@@ -24,14 +24,12 @@ func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal(err)
-	} else {
-		if cfg.BaseURL == "" {
-			cfg.BaseURL = "http://localhost:8080"
-		}
 	}
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	logger.Info("Config loaded", zap.String("BaseURL", cfg.BaseURL))
 
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		if err := runMigrations(cfg.DatabaseDSN, logger); err != nil {
@@ -45,8 +43,8 @@ func main() {
 	h := handler.NewHandler(repo, cfg, logger)
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logging(logger))
 	r.Use(middleware.GzipMiddleware)
+	r.Use(middleware.Logging(logger))
 	h.SetupRoutes(r)
 
 	srv := &http.Server{
