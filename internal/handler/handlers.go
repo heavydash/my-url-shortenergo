@@ -136,6 +136,7 @@ func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL stri
 		json.NewEncoder(w).Encode(model.Response{Result: shortURL})
 	} else {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, shortURL)
 	}
 }
