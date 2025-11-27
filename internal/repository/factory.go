@@ -21,13 +21,12 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 			logger.Info("using postgres storage")
 			return NewPostgres(pool.Pool, logger)
 		}
-	}
-
-	if cfg.FileStoragePath != "" {
+	} else if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
 		return NewFileRepository(cfg.FileStoragePath)
+	} else {
+		logger.Info("using in-memory storage")
+		return NewMemoryRepository()
 	}
-
-	logger.Info("using in-memory storage")
-	return NewMemoryRepository()
+	return nil
 }
