@@ -19,7 +19,7 @@ func NewFactory(cfg *config.Config, logger *zap.Logger) URLRepository {
 			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
 		} else {
 			logger.Info("using postgres storage")
-			return NewPostgres(pool.Pool)
+			return NewPostgres(pool.Pool, logger)
 		}
 	}
 

@@ -86,19 +86,25 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		UserID:      userID,
 	}
 
-	//Сохранение
+	// Сохранение
 	saved, err := h.repo.SaveURL(m)
+
 	if err != nil {
+		if strings.Contains(err.Error(), "conflict") {
+			w.WriteHeader(http.StatusConflict)
+			h.sendResponse(w, isJSON, saved.ShortURL)
+			return
+		}
+
+		h.logger.Error("Failed to save URL", zap.Error(err))
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	if saved.StatusCode == http.StatusConflict {
-		w.WriteHeader(http.StatusConflict)
-	} else {
-		w.WriteHeader(http.StatusCreated)
-	}
-	h.sendSuccess(w, isJSON, saved.ShortURL)
+
+	w.WriteHeader(http.StatusCreated)
+	h.sendResponse(w, isJSON, saved.ShortURL)
 }
+
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -124,31 +130,24 @@ func (h *Handler) isValidURL(u string) bool {
 	return err == nil
 }
 
-func (h *Handler) sendSuccess(w http.ResponseWriter, isJSON bool, shortURL string) {
+func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL string) {
 	if isJSON {
-		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		resp := model.Response{Result: shortURL}
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			h.logger.Error("json encode failed", zap.Error(err))
 		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	if _, err := w.Write([]byte(shortURL)); err != nil {
-		h.logger.Error("write failed", zap.Error(err))
 	}
 }
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
+	w.WriteHeader(status)
 	if isJSON {
-		resp := model.Response{Error: msg}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
+		resp := model.Response{Error: msg}
 		json.NewEncoder(w).Encode(resp)
 	} else {
-		http.Error(w, msg, status)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(msg))
 	}
 }
 

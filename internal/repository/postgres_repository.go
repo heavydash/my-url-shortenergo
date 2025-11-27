@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
+	"go.uber.org/zap"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -16,10 +16,12 @@ type PostgresRepository struct {
 	pool     *pgxpool.Pool
 	initOnce sync.Once
 	initErr  error
+	logger   *zap.Logger
 }
 
-func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+func NewPostgres(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepository {
+	return &PostgresRepository{pool: pool,
+		logger: logger}
 }
 
 func (r *PostgresRepository) initTable(ctx context.Context) error {
@@ -33,6 +35,7 @@ func (r *PostgresRepository) initTable(ctx context.Context) error {
 				created_at TIMESTAMPTZ DEFAULT NOW()
 			);
 			CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
+   CREATE UNIQUE INDEX IF NOT EXISTS idx_original_url ON urls (original_url);
 		`)
 	})
 	return r.initErr
@@ -42,35 +45,32 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	if err := r.initTable(context.Background()); err != nil {
 		return model.URLModel{}, err
 	}
-	var existingShortURL string
-	err := r.pool.QueryRow(context.Background(), `
-SELECT short_url FROM urls WHERE original_url=$1
-`, m.OriginalURL).Scan(&existingShortURL)
 
-	if err == nil {
-		// Дубликат
-		m.ShortURL = existingShortURL
-		m.StatusCode = http.StatusConflict
-		return m, nil
-	}
-
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return model.URLModel{}, err
-	}
-
-	// Новая запись
-	_, err = r.pool.Exec(context.Background(), `
-INSERT INTO urls (uuid, short_url, original_url, user_id)
-VALUES ($1, $2, $3, $4)
-`,
-		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
-	)
-
+	query := `
+	INSERT INTO urls (UUID, short_url, original_url)
+	VALUES ($1, $2, $3)
+	ON CONFLICT (original_url) DO NOTHING
+`
+	cmd, err := r.pool.Exec(context.Background(), query, m.UUID, m.ShortURL, m.OriginalURL)
 	if err != nil {
+		r.logger.Error("INSERT err", zap.Error(err))
 		return model.URLModel{}, err
 	}
 
-	m.StatusCode = http.StatusCreated
+	rows := cmd.RowsAffected()
+	r.logger.Info("RowsAffected", zap.Int64("rows", cmd.RowsAffected()))
+
+	if rows == 0 {
+		r.logger.Info("Conflict detected")
+		var existing model.URLModel
+		q := ` SELECT uuid, short_url, original_url FROM urls WHERE original_url = $1`
+		err = r.pool.QueryRow(context.Background(), q, m.OriginalURL).Scan(&existing.UUID, &existing.ShortURL, &existing.OriginalURL)
+		if err != nil {
+			r.logger.Error("Select existing err", zap.Error(err))
+			return model.URLModel{}, err
+		}
+		return existing, fmt.Errorf("conflict")
+	}
 	return m, nil
 }
 
