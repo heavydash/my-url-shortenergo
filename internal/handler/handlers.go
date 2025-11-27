@@ -133,10 +133,10 @@ func (h *Handler) isValidURL(u string) bool {
 func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL string) {
 	if isJSON {
 		w.Header().Set("Content-Type", "application/json")
-		resp := model.Response{Result: shortURL}
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			h.logger.Error("json encode failed", zap.Error(err))
-		}
+		json.NewEncoder(w).Encode(model.Response{Result: shortURL})
+	} else {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprint(w, shortURL)
 	}
 }
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
