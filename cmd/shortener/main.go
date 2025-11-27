@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/heavydash/my-url-shortenergo/migrations"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	"github.com/heavydash/my-url-shortenergo/migrations"
 	"go.uber.org/zap"
 )
 

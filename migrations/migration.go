@@ -12,5 +12,5 @@ func RunMigrations(dsn string) error {
 	}
 	defer db.Close()
 
-	return goose.Up(db, ".")
+	return goose.Up(db, "migrations")
 }

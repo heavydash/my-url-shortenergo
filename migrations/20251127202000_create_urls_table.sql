@@ -1,5 +1,5 @@
+-- migrations/20251127202000_create_urls_table.sql
 -- +goose Up
--- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS urls (
                                     uuid TEXT PRIMARY KEY,
                                     short_url TEXT UNIQUE NOT NULL,
@@ -9,9 +9,6 @@ CREATE TABLE IF NOT EXISTS urls (
     );
 
 CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE IF EXISTS urls;
--- +goose StatementEnd
