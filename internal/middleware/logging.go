@@ -29,8 +29,7 @@ func Logging(logger *zap.Logger) func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
-			ww := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(ww, r)
+			next.ServeHTTP(w, r)
 
 			duration := time.Since(start)
 
@@ -40,8 +39,6 @@ func Logging(logger *zap.Logger) func(next http.Handler) http.Handler {
 			)
 
 			logger.Info("response sent",
-				zap.Int("status", ww.status),
-				zap.Int64("size", ww.size),
 				zap.Duration("duration", duration),
 			)
 		})

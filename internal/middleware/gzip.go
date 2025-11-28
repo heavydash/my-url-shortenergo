@@ -1,4 +1,3 @@
-// internal/middleware/gzip.go
 package middleware
 
 import (
