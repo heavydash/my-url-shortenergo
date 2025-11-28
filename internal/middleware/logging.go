@@ -29,20 +29,41 @@ func Logging(logger *zap.Logger) func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
-			logger.Info("request received",
-				zap.String("method", r.Method),
-				zap.String("uri", r.RequestURI))
-
-			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-			next.ServeHTTP(rec, r)
+			ww := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(ww, r)
 
 			duration := time.Since(start)
 
+			logger.Info("request received",
+				zap.String("method", r.Method),
+				zap.String("url", r.RequestURI),
+			)
+
 			logger.Info("response sent",
-				zap.Int("status", rec.status),
-				zap.Int("size", rec.size),
+				zap.Int("status", ww.status),
+				zap.Int64("size", ww.size),
 				zap.Duration("duration", duration),
 			)
 		})
 	}
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+	size   int64
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	if rw.status == 0 {
+		rw.status = http.StatusOK
+	}
+	n, err := rw.ResponseWriter.Write(b)
+	rw.size += int64(n)
+	return n, err
 }
