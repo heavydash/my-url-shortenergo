@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS urls (
                                     created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
 
 -- +goose Down
 DROP TABLE IF EXISTS urls;

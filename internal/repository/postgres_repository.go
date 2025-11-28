@@ -21,46 +21,46 @@ func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-func (r *PostgresRepository) initTable(ctx context.Context) error {
-	r.initOnce.Do(func() {
-		_, r.initErr = r.pool.Exec(ctx, `
-			CREATE TABLE IF NOT EXISTS urls (
-				uuid TEXT PRIMARY KEY,
-				short_url TEXT UNIQUE NOT NULL,
-				original_url TEXT NOT NULL,
-				user_id TEXT,
-				created_at TIMESTAMPTZ DEFAULT NOW()
-			);
-			CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
-		`)
-	})
-	return r.initErr
-}
-
 func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
-	if err := r.initTable(context.Background()); err != nil {
-		return model.URLModel{}, err
-	}
-
 	query := `
 		INSERT INTO urls (uuid, short_url, original_url, user_id)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (uuid) DO UPDATE SET
-			short_url = EXCLUDED.short_url,
-			original_url = EXCLUDED.original_url,
-			user_id = EXCLUDED.user_id
+		ON CONFLICT (original_url) DO NOTHING
+		RETURNING uuid, short_url
 	`
-	_, err := r.pool.Exec(context.Background(), query, m.UUID, m.ShortURL, m.OriginalURL, m.UUID)
-	return m, err
-}
 
-func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
-	if err := r.initTable(context.Background()); err != nil {
-		return model.URLModel{}, err
+	var returnedUUID, returnedShortURL string
+	err := r.pool.QueryRow(context.Background(), query,
+		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
+	).Scan(&returnedUUID, &returnedShortURL)
+
+	if err == nil {
+		// Успешно вставили
+		m.UUID = returnedUUID
+		m.ShortURL = returnedShortURL
+		return m, nil
 	}
 
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Конфликт ищем существующий
+		var existing model.URLModel
+		err = r.pool.QueryRow(context.Background(),
+			`SELECT uuid, short_url, original_url, user_id FROM urls WHERE original_url = $1`,
+			m.OriginalURL,
+		).Scan(&existing.UUID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID)
+
+		if err != nil {
+			return model.URLModel{}, err
+		}
+
+		return existing, ErrConflict
+	}
+
+	return model.URLModel{}, err
+}
+func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	var m model.URLModel
-	query := `SELECT uuid, short_url, original_url, user_id FROM urls WHERE short_url = $1`
+	query := `SELECT uuid, short_url, original_url, user_id FROM urls WHERE uuid = $1`
 	err := r.pool.QueryRow(context.Background(), query, id).Scan(&m.UUID, &m.ShortURL, &m.OriginalURL, &m.UUID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.URLModel{}, fmt.Errorf("url not found")
@@ -72,9 +72,6 @@ func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 }
 
 func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
-	if err := r.initTable(ctx); err != nil {
-		return err
-	}
 
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

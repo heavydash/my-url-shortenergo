@@ -3,6 +3,7 @@ package migrations
 import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"strings"
 )
 
 func RunMigrations(dsn string) error {
@@ -12,5 +13,12 @@ func RunMigrations(dsn string) error {
 	}
 	defer db.Close()
 
-	return goose.Up(db, "migrations")
+	err = goose.Up(db, "migrations")
+	if err != nil {
+		if strings.Contains(err.Error(), "no next version found") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
