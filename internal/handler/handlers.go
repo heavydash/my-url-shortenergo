@@ -102,7 +102,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		h.logger.Error("ShortenHandler: SaveURL failed", zap.Error(err))
 		if errors.Is(err, repository.ErrConflict) {
 			fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), saved.ShortURL)
-			w.WriteHeader(http.StatusConflict)
+			h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url", fullURL))
 			h.sendResponse(w, isJSON, fullURL, http.StatusConflict)
 			return
 		}
@@ -115,7 +115,6 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		saved.ShortURL)
 	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
 		fullURL))
-	w.WriteHeader(http.StatusCreated)
 	h.sendResponse(w, isJSON, fullURL, http.StatusCreated)
 }
 
@@ -146,16 +145,15 @@ func (h *Handler) isValidURL(u string) bool {
 
 func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL string, status int) {
 	if isJSON {
-		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(model.Response{Result: shortURL})
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(status)
-	w.Write([]byte(shortURL))
+	_, _ = w.Write([]byte(shortURL))
 }
 
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
