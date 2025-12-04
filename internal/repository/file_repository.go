@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -75,4 +76,7 @@ func (r *FileRepository) Clear() {
 	r.file.Truncate(0)
 	r.file.Seek(0, 0)
 	clear(r.urls)
+}
+func (r *FileRepository) Ping(ctx context.Context) error {
+	return nil
 }

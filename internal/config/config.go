@@ -2,69 +2,46 @@ package config
 
 import (
 	"flag"
-	"fmt"
-	"log"
-	"net/url"
 	"os"
-	"strings"
 )
 
 type Config struct {
-	ServerAddr string
-	BaseURL    string
+	ServerAddr      string
+	BaseURL         string
+	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func NewConfig() (*Config, error) {
+
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	a := fs.String("a", ":8080", "address to run HTTP server")
+	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
+	f := fs.String("f", "", "file path to store the URL")
+	d := fs.String("d", "", "DSN to store the URL")
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
-		ServerAddr: ":8080",
-		BaseURL:    "http://localhost:8080",
+		ServerAddr:      *a,
+		BaseURL:         *b,
+		FileStoragePath: *f,
+		DatabaseDSN:     *d,
 	}
 
-	fs := flag.NewFlagSet("my-url-shortener", flag.ContinueOnError)
-	fs.StringVar(&cfg.ServerAddr, "a", cfg.ServerAddr, "address to run HTTP server")
-	fs.StringVar(&cfg.BaseURL, "b", cfg.BaseURL, "base URL for shortened links")
-
-	if port, exists := os.LookupEnv("SERVER_PORT"); exists && port != "" {
-		log.Printf("Using server port from SERVER_PORT: %s", port)
-		cfg.ServerAddr = fmt.Sprintf("localhost:%s", port)
-	}
-
-	args := make([]string, 0)
-	for i := 1; i < len(os.Args); i++ {
-		if strings.HasPrefix(os.Args[i], "-a=") || strings.HasPrefix(os.Args[i], "-b=") {
-			parts := strings.SplitN(os.Args[i], "=", 2)
-			args = append(args, parts[0], parts[1])
-		} else if os.Args[i] == "-a" || os.Args[i] == "-b" {
-			args = append(args, os.Args[i])
-			if i+1 < len(os.Args) {
-				args = append(args, os.Args[i+1])
-				i++
-			}
-		}
-	}
-	if err := fs.Parse(args); err != nil {
-		return nil, fmt.Errorf("parsing flags: %w", err)
-	}
-	if addr, exists := os.LookupEnv("SERVER_ADDRESS"); exists && addr != "" {
-		log.Printf("Using server address: %s", addr)
+	if addr, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
 		cfg.ServerAddr = addr
-	} else if fs.NFlag() == 0 && cfg.ServerAddr == ":8080" {
-		log.Printf("Using default server address: %s", cfg.ServerAddr)
 	}
-	if URL, exists := os.LookupEnv("BASE_URL"); exists && URL != "" {
-		log.Printf("Using base URL: %s", URL)
-		cfg.BaseURL = URL
-	} else {
-		log.Printf("Using default base URL: %s", cfg.BaseURL)
+	if base, ok := os.LookupEnv("BASE_URL"); ok {
+		cfg.BaseURL = base
 	}
-
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = fmt.Sprintf("https://%s/", cfg.ServerAddr)
+	if path, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+		cfg.FileStoragePath = path
 	}
-	u, err := url.Parse(cfg.BaseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		log.Printf("Using default base URL: %s", cfg.BaseURL)
-		cfg.BaseURL = "http://localhost:8080/"
+	if dsn, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = dsn
 	}
 	return cfg, nil
 }
