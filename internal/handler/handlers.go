@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -53,19 +54,24 @@ func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
-
+	h.logger.Info("ShortenHandler: request started", zap.Bool("isJSON", isJSON))
 	//Парсинг запроса
 	reqURL, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	h.logger.Info("ShortenHandler: parsed URL", zap.String("original_url", reqURL))
 
 	//Валидация URL
 	if !h.isValidURL(reqURL) {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
+
+	// Получаем userID из контекста
+	userID, _ := r.Context().Value("userID").(string)
+	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID))
 
 	//Генерация ID
 	id, err := idgen.IDGen()
@@ -74,28 +80,42 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	h.logger.Info("ShortenHandler: generated ID", zap.String("id", id))
+
 	//Модель
 	m := model.URLModel{
 		UUID:        id,
-		ShortURL:    fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id),
+		ShortURL:    id,
 		OriginalURL: reqURL,
+		UserID:      userID,
 	}
+
+	h.logger.Info("ShortenHandler: calling SaveURL",
+		zap.String("uuid", m.UUID),
+		zap.String("short_url", m.ShortURL),
+		zap.String("original_url", m.OriginalURL),
+		zap.String("user_id", m.UserID))
 
 	//Сохранение
 	saved, err := h.repo.SaveURL(m)
 	if err != nil {
-		h.logger.Error("Failed to save URL", zap.Error(err))
-		status := http.StatusInternalServerError
-		msg := "Internal Server Error"
-		if strings.Contains(err.Error(), "collision") {
-			status = http.StatusServiceUnavailable
-			msg = "Service overloaded, try again later"
+		h.logger.Error("ShortenHandler: SaveURL failed", zap.Error(err))
+		if errors.Is(err, repository.ErrConflict) {
+			fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), saved.ShortURL)
+			h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url", fullURL))
+			h.sendResponse(w, isJSON, fullURL, http.StatusConflict)
+			return
 		}
-		h.sendError(w, isJSON, msg, status)
+		// 500
+		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	//Отправка ответа
-	h.sendSuccess(w, isJSON, saved.ShortURL)
+	// 201
+	fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"),
+		saved.ShortURL)
+	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
+		fullURL))
+	h.sendResponse(w, isJSON, fullURL, http.StatusCreated)
 }
 
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
@@ -123,26 +143,22 @@ func (h *Handler) isValidURL(u string) bool {
 	return err == nil
 }
 
-func (h *Handler) sendSuccess(w http.ResponseWriter, isJSON bool, shortURL string) {
+func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL string, status int) {
 	if isJSON {
-		resp := model.Response{Result: shortURL}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			h.logger.Error("json encode failed", zap.Error(err))
-		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(model.Response{Result: shortURL})
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	if _, err := w.Write([]byte(shortURL)); err != nil {
-		h.logger.Error("write failed", zap.Error(err))
-	}
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(shortURL))
 }
+
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
 	if isJSON {
-		resp := model.Response{Error: msg}
+		resp := map[string]string{"error": msg}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(resp)

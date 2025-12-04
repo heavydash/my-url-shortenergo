@@ -14,6 +14,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	"github.com/heavydash/my-url-shortenergo/migrations"
 	"go.uber.org/zap"
 )
 
@@ -25,6 +26,14 @@ func main() {
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	if cfg.DatabaseDSN != "" {
+		logger.Info("running database migrations...")
+		if err := migrations.RunMigrations(cfg.DatabaseDSN); err != nil {
+			logger.Fatal("migration failed", zap.Error(err))
+		}
+		logger.Info("migrations completed")
+	}
 
 	repo := repository.NewFactory(cfg, logger)
 	h := handler.NewHandler(repo, cfg, logger)
