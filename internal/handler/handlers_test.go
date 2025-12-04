@@ -3,14 +3,20 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
-	"github.com/go-chi/chi"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
-	"go.uber.org/zap"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi"
+	"github.com/golang/mock/gomock"
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
+	"github.com/heavydash/my-url-shortenergo/internal/repository/mocks"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
@@ -25,7 +31,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	cfg := &config.Config{BaseURL: "http://localhost:33675/"}
 
 	logger, _ := zap.NewProduction()
-	defer func() { _ = logger.Sync() }()
+	t.Cleanup(func() { _ = logger.Sync() })
 
 	h := NewHandler(repo, cfg, logger)
 	r := chi.NewRouter()
@@ -109,4 +115,86 @@ func TestGzipOut(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Contains(t, string(body), "http://localhost:33675/")
 	})
+}
+func TestBatchShortenHandler_OK(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mocks.NewMockURLRepository(ctrl)
+	_ = mockRepo
+	mockRepo.EXPECT().
+		SaveBatch(gomock.Any(), gomock.Len(2)).
+		Return(nil).
+		Times(1)
+
+	h := NewHandler(mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+
+	body := `[
+		{"correlation_id": "1", "original_url": "https://ya.ru"},
+		{"correlation_id": "2", "original_url": "https://google.com"}
+	]`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.BatchShortenHandler(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp []model.BatchResponseItem
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp, 2)
+	require.Equal(t, "1", resp[0].CorrelationID)
+	require.Contains(t, resp[0].OriginalURL, "http://localhost:8080/")
+	require.Equal(t, "2", resp[1].CorrelationID)
+	require.Contains(t, resp[1].OriginalURL, "http://localhost:8080/")
+}
+
+func TestBatchShortenHandler_EmptyBatch(t *testing.T) {
+	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(`[]`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.BatchShortenHandler(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "empty batch")
+}
+
+func TestBatchShortenHandler_DuplicateCorrelationID(t *testing.T) {
+	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+
+	body := `[
+		{"correlation_id": "dup", "original_url": "https://ya.ru"},
+		{"correlation_id": "dup", "original_url": "https://google.com"}
+	]`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.BatchShortenHandler(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "duplicate correlation_id")
+}
+
+func TestBatchShortenHandler_InvalidURL(t *testing.T) {
+	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+
+	body := `[
+		{"correlation_id": "1", "original_url": "not-a-url"}
+	]`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.BatchShortenHandler(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "invalid url")
 }

@@ -3,15 +3,16 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"go.uber.org/zap"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
+	"go.uber.org/zap"
 
 	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
@@ -37,6 +38,7 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.ShortenPlainHandler)
 	r.Post("/api/shorten", h.ShortenJSONHandler)
+	r.Post("/api/shorten/batch", h.BatchShortenHandler)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
 
@@ -188,5 +190,90 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("OK")); err != nil {
 		h.logger.Error("writestring failed", zap.Error(err))
+	}
+}
+func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok || userID == "" {
+		userID = "anonymous"
+	}
+
+	if r.Method != http.MethodPost {
+		h.sendError(w, true, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var batch []model.BatchRequestItem
+	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+		h.logger.Error("json decode failed", zap.Error(err))
+		h.sendError(w, true, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if len(batch) == 0 {
+		h.sendError(w, true, "empty batch", http.StatusBadRequest)
+		return
+	}
+	// Дублирование correlation_id
+	seen := make(map[string]bool)
+	for _, item := range batch {
+		if seen[item.CorrelationID] {
+			h.sendError(w, true, "duplicate correlation_id", http.StatusBadRequest)
+			return
+		}
+		seen[item.CorrelationID] = true
+		if item.CorrelationID == "" {
+			h.sendError(w, true, "empty original_url", http.StatusBadRequest)
+			return
+		}
+		if !strings.HasPrefix(item.OriginalURL, "http://") && !strings.HasPrefix(item.OriginalURL, "https://") {
+			h.sendError(w, true, "invalid url scheme", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Генерация моделей
+	batchModels := make([]model.URLModel, 0, len(batch))
+	respMap := make(map[string]string)
+
+	for _, item := range batch {
+		id, err := idgen.IDGen()
+		if err != nil || id == "" {
+			h.logger.Error("Failed to generate ID", zap.Error(err))
+			h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id)
+
+		batchModels = append(batchModels, model.URLModel{
+			UUID:        id,
+			ShortURL:    id,
+			OriginalURL: item.OriginalURL,
+			UserID:      userID,
+		})
+
+		respMap[item.CorrelationID] = shortURL
+	}
+	// Сохранение batch
+	if err := h.repo.SaveBatch(ctx, batchModels); err != nil {
+		h.logger.Error("Failed to save batch", zap.Error(err))
+		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Формирование ответа
+	batchResp := make([]model.BatchResponseItem, 0, len(batch))
+	for _, item := range batch {
+		batchResp = append(batchResp, model.BatchResponseItem{
+			CorrelationID: item.CorrelationID,
+			OriginalURL:   respMap[item.CorrelationID],
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(batchResp); err != nil {
+		h.logger.Error("encode batch response failed", zap.Error(err))
 	}
 }

@@ -2,16 +2,14 @@ package db
 
 import (
 	"context"
-	"time"
-
 	"github.com/jackc/pgx/v5/pgxpool"
+	"time"
 )
 
 type Pool struct {
 	*pgxpool.Pool
 }
 
-// Create pool
 func New(ctx context.Context, dsn string) (*Pool, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
