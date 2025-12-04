@@ -29,12 +29,6 @@ func New(ctx context.Context, dsn string) (*Pool, error) {
 		return nil, err
 	}
 
-	//Миграция
-	if err := migrate(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
-	}
-
 	//Проверка
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

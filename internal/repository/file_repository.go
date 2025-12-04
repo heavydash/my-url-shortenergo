@@ -50,7 +50,10 @@ func (r *FileRepository) loadFromFile() {
 
 func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	if url.UUID == "" {
-		id, _ := idgen.IDGen()
+		id, err := idgen.IDGen()
+		if err != nil {
+			return url, err
+		}
 		url.UUID = id
 		url.ShortURL = id
 	}
@@ -60,11 +63,12 @@ func (r *FileRepository) SaveURL(url model.URLModel) (model.URLModel, error) {
 	if err := r.encoder.Encode(url); err != nil {
 		return url, err
 	}
-	r.file.Write([]byte("\n"))
+	if _, err := r.file.Write([]byte("\n")); err != nil {
+		return url, err
+	}
 	r.urls[url.UUID] = url
 	return url, nil
 }
-
 func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
 	if url, ok := r.urls[id]; ok {
 		return url, nil
@@ -72,11 +76,17 @@ func (r *FileRepository) GetURL(id string) (model.URLModel, error) {
 	return model.URLModel{}, fmt.Errorf("not found")
 }
 
-func (r *FileRepository) Clear() {
-	r.file.Truncate(0)
-	r.file.Seek(0, 0)
-	clear(r.urls)
+func (r *FileRepository) Clear() error {
+	if err := r.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := r.file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	r.urls = make(map[string]model.URLModel)
+	return nil
 }
+
 func (r *FileRepository) Ping(ctx context.Context) error {
 	return nil
 }
