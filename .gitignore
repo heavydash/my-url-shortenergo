@@ -26,3 +26,4 @@ vendor/
 # Test results files for all increments
 test_results*.txt
 test_results*.txt
+.env

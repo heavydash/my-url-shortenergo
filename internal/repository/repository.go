@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"log"
 	"sync"
 
@@ -17,6 +18,7 @@ type URLRepository interface {
 	SaveBatch(ctx context.Context, batch []model.URLModel) error
 	Clear() error
 	Ping(ctx context.Context) error
+	GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error)
 }
 
 type MemoryRepository struct {
@@ -91,4 +93,26 @@ func (m *MemoryRepository) Ping(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return nil
+}
+
+func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if userID == uuid.Nil {
+		return []model.URLModel{}, nil
+	}
+
+	var result []model.URLModel
+	baseURL := "http://localhost:8080"
+
+	for _, m := range m.urls {
+		if m.UserID == userID && !m.Deleted {
+			result = append(result, model.URLModel{
+				ShortURL:    fmt.Sprintf("%s/%s", baseURL, m.ShortURL),
+				OriginalURL: m.OriginalURL,
+			})
+		}
+	}
+	return result, nil
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/joho/godotenv"
+	_ "github.com/joho/godotenv/autoload"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +21,10 @@ import (
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, continuing without it")
+	}
+
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal(err)
@@ -39,6 +45,9 @@ func main() {
 	h := handler.NewHandler(repo, cfg, logger)
 
 	r := chi.NewRouter()
+
+	r.Use(middleware.Auth())
+
 	r.Use(middleware.Logging(logger))
 	r.Use(middleware.GzipMiddleware)
 	h.SetupRoutes(r)

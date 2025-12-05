@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -98,4 +99,41 @@ func (r *PostgresRepository) Ping(ctx context.Context) error {
 func (r *PostgresRepository) Clear() error {
 	_, err := r.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
 	return err
+}
+
+func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+	if userID == uuid.Nil {
+		return []model.URLModel{}, nil
+	}
+
+	query := `
+	SELECT uuid, short_url, original_url, is_deleted
+	FROM urls
+	WHERE user_id = $1 AND is_deleted = false
+	ORDER BY created_at DESC
+`
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("Get Urls by User: query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var urls []model.URLModel
+	baseURL := "http://localhost:8080"
+
+	for rows.Next() {
+		var u model.URLModel
+		var deleted bool
+		if err := rows.Scan(&u.UUID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
+			return nil, fmt.Errorf("Get Urls by User: scan failed: %w", err)
+		}
+		if !deleted {
+			u.ShortURL = fmt.Sprintf("%s/%s", baseURL, u.ShortURL)
+			urls = append(urls, u)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return urls, nil
 }

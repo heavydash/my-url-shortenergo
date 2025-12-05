@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"os"
 	"sync"
@@ -120,4 +121,26 @@ func (r *FileRepository) Ping(ctx context.Context) error {
 	// Защита от race condition при параллельном доступе
 	defer r.mu.Unlock()
 	return nil
+}
+
+func (r *FileRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if userID == uuid.Nil {
+		return []model.URLModel{}, nil
+	}
+
+	var result []model.URLModel
+	baseURL := "http://localhost:8080"
+
+	for _, r := range r.urls {
+		if r.UserID == userID && !r.Deleted {
+			result = append(result, model.URLModel{
+				ShortURL:    fmt.Sprintf("%s/%s", baseURL, r.ShortURL),
+				OriginalURL: r.OriginalURL,
+			})
+		}
+	}
+	return result, nil
 }

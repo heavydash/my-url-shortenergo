@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"io"
 	"log"
 	"net/http"
@@ -42,7 +44,7 @@ func (h *Handler) SetupRoutes(r *chi.Mux) {
 	r.Post("/api/shorten/batch", h.BatchShortenHandler)
 	r.Get("/", h.HomeHandler)
 	r.Get("/{id}", h.RedirectURL)
-
+	r.Get("/api/user/urls", h.GetUserURLs)
 }
 
 func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
@@ -70,8 +72,12 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	}
 
 	// Получаем userID из контекста
-	userID, _ := r.Context().Value("userID").(string)
-	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID))
+	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+
+	if !ok {
+		userID = uuid.Nil
+	}
+	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID.String()))
 
 	//Генерация ID
 	id, err := idgen.IDGen()
@@ -94,7 +100,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		zap.String("uuid", m.UUID),
 		zap.String("short_url", m.ShortURL),
 		zap.String("original_url", m.OriginalURL),
-		zap.String("user_id", m.UserID))
+		zap.String("user_id", m.UserID.String()))
 
 	//Сохранение
 	saved, err := h.repo.SaveURL(m)
@@ -143,17 +149,25 @@ func (h *Handler) isValidURL(u string) bool {
 	return err == nil
 }
 
-func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, shortURL string, status int) {
+func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, data any, status int) {
 	if isJSON {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(model.Response{Result: shortURL})
+		// Теперь any можно передать строку, слайс, мпау, структуру
+		if err := json.NewEncoder(w).Encode(data); err != nil {
+			h.logger.Error("Failed to encode response", zap.Error(err))
+		}
 		return
 	}
 
+	str, ok := data.(string)
+	if !ok {
+		http.Error(w, "InternalServerError", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(status)
-	_, _ = w.Write([]byte(shortURL))
+	_, _ = w.Write([]byte(str))
 }
 
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
@@ -211,9 +225,9 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	userID, ok := r.Context().Value("userID").(string)
-	if !ok || userID == "" {
-		userID = "anonymous"
+	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		userID = uuid.Nil
 	}
 
 	if r.Method != http.MethodPost {
@@ -292,4 +306,28 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(batchResp); err != nil {
 		h.logger.Error("encode batch response failed", zap.Error(err))
 	}
+}
+
+func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	// Достаём из контекста
+	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Теперь ищем URL этого пользователя
+	urls, err := h.repo.GetURLsByUser(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("GetURLsByUser failed", zap.Error(err))
+		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	// Если URL нет — 204
+	if len(urls) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	h.sendResponse(w, true, urls, http.StatusOK)
 }
