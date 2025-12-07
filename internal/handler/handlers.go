@@ -37,16 +37,6 @@ func NewHandler(
 		logger: logger}
 }
 
-func (h *Handler) SetupRoutes(r *chi.Mux) {
-	r.Get("/ping", h.PingHandler)
-	r.Post("/", h.ShortenPlainHandler)
-	r.Post("/api/shorten", h.ShortenJSONHandler)
-	r.Post("/api/shorten/batch", h.BatchShortenHandler)
-	r.Get("/", h.HomeHandler)
-	r.Get("/{id}", h.RedirectURL)
-	r.Get("/api/user/urls", h.GetUserURLs)
-}
-
 func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 	h.ShortenHandler(w, r, true)
 }
@@ -77,7 +67,8 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	if !ok {
 		userID = uuid.Nil
 	}
-	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID.String()))
+
+	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userIDString(userID)))
 
 	//Генерация ID
 	id, err := idgen.IDGen()
@@ -100,7 +91,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		zap.String("uuid", m.UUID),
 		zap.String("short_url", m.ShortURL),
 		zap.String("original_url", m.OriginalURL),
-		zap.String("user_id", m.UserID.String()))
+		zap.String("user_id", userIDString(m.UserID)))
 
 	//Сохранение
 	saved, err := h.repo.SaveURL(m)
@@ -109,7 +100,11 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		if errors.Is(err, repository.ErrConflict) {
 			fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), saved.ShortURL)
 			h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url", fullURL))
-			h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusConflict)
+			if isJSON {
+				h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusConflict)
+			} else {
+				h.sendResponse(w, isJSON, fullURL, http.StatusConflict)
+			}
 			return
 		}
 		// 500
@@ -121,7 +116,11 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		saved.ShortURL)
 	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
 		fullURL))
-	h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusCreated)
+	if isJSON {
+		h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusCreated)
+	} else {
+		h.sendResponse(w, isJSON, fullURL, http.StatusCreated)
+	}
 }
 
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
@@ -330,4 +329,11 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.sendResponse(w, true, urls, http.StatusOK)
+}
+
+func userIDString(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return "anonymous"
+	}
+	return id.String()
 }

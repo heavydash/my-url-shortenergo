@@ -38,12 +38,9 @@ func decodeBase64(s string) ([]byte, error) {
 
 // Создать и установить куку
 func SetSignedCookie(w http.ResponseWriter, userID uuid.UUID) {
-	// Превращаем UUID в []byte (16 байт)
-	var userIDBytes [16]byte
-	copy(userIDBytes[:], userID[:])
+	userIDBytes := userID[:]
 
-	//
-	payload := encodeBase64(userIDBytes[:])
+	payload := encodeBase64(userIDBytes)
 
 	// HMAc-SHA256 от payload
 	mac := hmac.New(sha256.New, secretKey)
@@ -97,10 +94,7 @@ func GetUserIDFromCookie(r *http.Request) (uuid.UUID, error) {
 		return uuid.Nil, http.ErrNoCookie
 	}
 
-	userID, err := uuid.FromBytes(userIDBytes)
-	if err != nil {
-		return uuid.Nil, http.ErrNoCookie
-	}
-
+	var userID uuid.UUID
+	copy(userID[:], userIDBytes)
 	return userID, nil
 }

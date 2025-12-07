@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
@@ -39,17 +39,30 @@ func main() {
 	repo := repository.NewFactory(cfg, logger)
 	h := handler.NewHandler(repo, cfg, logger)
 
-	r := chi.NewRouter()
+	router := chi.NewRouter()
 
-	r.Use(middleware.Auth())
+	// Глобальные
+	router.Use(middleware.Logging(logger))
+	router.Use(middleware.GzipMiddleware)
 
-	r.Use(middleware.Logging(logger))
-	r.Use(middleware.GzipMiddleware)
-	h.SetupRoutes(r)
+	// Роуты без авторизации
+	router.Get("/ping", h.PingHandler)
+	router.Post("/", h.ShortenPlainHandler)
+	router.Post("/api/shorten", h.ShortenJSONHandler)
+	router.Post("/api/shorten/batch", h.BatchShortenHandler)
+	router.Get("/", h.HomeHandler)
+	router.Get("/{id}", h.RedirectURL)
+	router.Get("/api/user/urls", h.GetUserURLs)
+
+	// Авторизованные роуты
+	router.Group(func(r chi.Router) {
+		r.Use(middleware.Auth())
+		r.Get("/api/user/urls", h.GetUserURLs)
+	})
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
-		Handler: r}
+		Handler: router}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
