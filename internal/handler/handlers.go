@@ -109,7 +109,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		if errors.Is(err, repository.ErrConflict) {
 			fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), saved.ShortURL)
 			h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url", fullURL))
-			h.sendResponse(w, isJSON, fullURL, http.StatusConflict)
+			h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusConflict)
 			return
 		}
 		// 500
@@ -121,7 +121,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		saved.ShortURL)
 	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
 		fullURL))
-	h.sendResponse(w, isJSON, fullURL, http.StatusCreated)
+	h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusCreated)
 }
 
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
