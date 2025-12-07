@@ -114,7 +114,7 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 `
 	rows, err := r.pool.Query(ctx, query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("Get Urls by User: query failed: %w", err)
+		return nil, fmt.Errorf("get urls by user: query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -125,7 +125,7 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 		var u model.URLModel
 		var deleted bool
 		if err := rows.Scan(&u.UUID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
-			return nil, fmt.Errorf("Get Urls by User: scan failed: %w", err)
+			return nil, fmt.Errorf("get urls by user: scan failed: %w", err)
 		}
 		if !deleted {
 			u.ShortURL = fmt.Sprintf("%s/%s", baseURL, u.ShortURL)
