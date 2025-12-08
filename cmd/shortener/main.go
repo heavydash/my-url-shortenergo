@@ -45,20 +45,19 @@ func main() {
 	router.Use(middleware.Logging(logger))
 	router.Use(middleware.GzipMiddleware)
 
-	// Роуты без авторизации
+	// Авторизованные роуты
+	router.Group(func(r chi.Router) {
+		r.Use(middleware.Auth())
+		r.Get("/api/user/urls", h.GetUserURLs)
+	})
+
+	// Анонимные
 	router.Get("/ping", h.PingHandler)
 	router.Post("/", h.ShortenPlainHandler)
 	router.Post("/api/shorten", h.ShortenJSONHandler)
 	router.Post("/api/shorten/batch", h.BatchShortenHandler)
 	router.Get("/", h.HomeHandler)
 	router.Get("/{id}", h.RedirectURL)
-	router.Get("/api/user/urls", h.GetUserURLs)
-
-	// Авторизованные роуты
-	router.Group(func(r chi.Router) {
-		r.Use(middleware.Auth())
-		r.Get("/api/user/urls", h.GetUserURLs)
-	})
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
