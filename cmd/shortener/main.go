@@ -45,6 +45,8 @@ func main() {
 	router.Use(middleware.Logging(logger))
 	router.Use(middleware.GzipMiddleware)
 
+	router.Get("/{id}", h.RedirectURL)
+
 	// Авторизованные роуты
 	router.Group(func(r chi.Router) {
 		r.Use(middleware.Auth())
@@ -53,11 +55,11 @@ func main() {
 
 	// Анонимные
 	router.Get("/ping", h.PingHandler)
+	router.Get("/", h.HomeHandler)
+
 	router.Post("/", h.ShortenPlainHandler)
 	router.Post("/api/shorten", h.ShortenJSONHandler)
 	router.Post("/api/shorten/batch", h.BatchShortenHandler)
-	router.Get("/", h.HomeHandler)
-	router.Get("/{id}", h.RedirectURL)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,

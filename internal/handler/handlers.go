@@ -191,10 +191,9 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if len(id) == 0 {
-		h.logger.Error("Error invalid ID: empty", zap.String("id", id))
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+	id := chi.URLParamFromCtx(r.Context(), "id")
+	if id == "" {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	urlModel, err := h.repo.GetURL(id)
