@@ -45,7 +45,9 @@ func main() {
 	router.Use(middleware.Logging(logger))
 	router.Use(middleware.GzipMiddleware)
 
-	router.Get("/{id}", h.RedirectURL)
+	router.Route("/{id}", func(r chi.Router) {
+		r.Get("/", h.RedirectURL)
+	})
 
 	// Авторизованные роуты
 	router.Group(func(r chi.Router) {

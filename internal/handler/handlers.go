@@ -190,6 +190,7 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("Write home message failed", zap.Error(err))
 	}
 }
+
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParamFromCtx(r.Context(), "id")
 	if id == "" {
@@ -209,6 +210,7 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, urlModel.OriginalURL, http.StatusTemporaryRedirect)
 }
+
 func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
