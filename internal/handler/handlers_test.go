@@ -34,23 +34,30 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	t.Cleanup(func() { _ = logger.Sync() })
 
 	h := NewHandler(repo, cfg, logger)
+
 	router := chi.NewRouter()
 	router.Use(middleware.Logging(logger))
 	router.Use(middleware.GzipMiddleware)
 
-	// Авторизованные роуты
-	router.Group(func(auth chi.Router) {
-		auth.Use(middleware.Auth())
-		auth.Get("/api/user/urls", h.GetUserURLs)
+	router.Get("/{id}", h.RedirectURL)
+
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
 	})
 
-	// Анонимные роуты
+	// Авторизованные роуты
+	router.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(logger))
+		r.Get("/api/user/urls", h.GetUserURLs)
+	})
+
+	// Анонимные
+	router.Get("/ping", h.PingHandler)
+	router.Get("/", h.HomeHandler)
+
 	router.Post("/", h.ShortenPlainHandler)
 	router.Post("/api/shorten", h.ShortenJSONHandler)
 	router.Post("/api/shorten/batch", h.BatchShortenHandler)
-	router.Get("/{id}", h.RedirectURL)
-	router.Get("/ping", h.PingHandler)
-	router.Get("/", h.HomeHandler)
 
 	w := httptest.NewRecorder()
 	return router, w, cfg, repo
