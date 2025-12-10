@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
 	"net/http"
@@ -20,14 +21,16 @@ import (
 )
 
 func main() {
+	// Конфиг
 	cfg, err := config.NewConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	// Логгер
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Миграции, если есть DSN
 	if cfg.DatabaseDSN != "" {
 		logger.Info("running database migrations...")
 		if err := migrations.RunMigrations(cfg.DatabaseDSN); err != nil {
@@ -36,9 +39,33 @@ func main() {
 		logger.Info("migrations completed")
 	}
 
-	repo := repository.NewFactory(cfg, logger)
+	// Создаем репозиторий
+	var repo repository.URLRepository
+
+	if cfg.DatabaseDSN != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		pool, err := db.New(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
+			repo = repository.NewMemoryRepository()
+		} else {
+			logger.Info("using postgres storage")
+			repo = repository.NewPostgres(pool.Pool)
+		}
+	} else if cfg.FileStoragePath != "" {
+		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
+		repo = repository.NewFileRepository(cfg.FileStoragePath)
+	} else {
+		logger.Info("using in-memory storage")
+		repo = repository.NewMemoryRepository()
+	}
+
+	// Хендлер
 	h := handler.NewHandler(repo, cfg, logger)
 
+	// Роутер
 	router := chi.NewRouter()
 
 	// Глобальные
@@ -65,6 +92,7 @@ func main() {
 	router.Post("/api/shorten", h.ShortenJSONHandler)
 	router.Post("/api/shorten/batch", h.BatchShortenHandler)
 
+	// Сервер
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: router}
@@ -77,6 +105,7 @@ func main() {
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 
+	// Gracefull shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
