@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"io"
 	"log"
 	"net/http"
@@ -64,11 +66,12 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	// Получаем userID из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
 
-	if !ok {
-		userID = uuid.Nil
+	if !ok || userID == uuid.Nil {
+		userID = uuid.New()
+		util.SetSignedCookie(w, userID)
 	}
 
-	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userIDString(userID)))
+	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID.String()))
 
 	//Генерация ID
 	id, err := idgen.IDGen()
@@ -91,7 +94,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		zap.String("uuid", m.UUID),
 		zap.String("short_url", m.ShortURL),
 		zap.String("original_url", m.OriginalURL),
-		zap.String("user_id", userIDString(m.UserID)))
+		zap.String("user_id", userID.String()))
 
 	//Сохранение
 	saved, err := h.repo.SaveURL(m)
@@ -192,7 +195,9 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParamFromCtx(r.Context(), "id")
+	h.logger.Info("=== REDIRECT HANDLER CALLED ===", zap.String("path", r.URL.Path))
+	id := chi.URLParam(r, "id")
+	id = r.URL.Path[1:] // отрезаем первый слеш
 	if id == "" {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -227,7 +232,8 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 
 	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
 	if !ok || userID == uuid.Nil {
-		userID = uuid.Nil
+		userID = uuid.New()
+		util.SetSignedCookie(w, userID)
 	}
 
 	if r.Method != http.MethodPost {
@@ -312,29 +318,24 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	// Достаём из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
 	if !ok || userID == uuid.Nil {
-		w.WriteHeader(http.StatusNoContent)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	// Теперь ищем URL этого пользователя
-	urls, err := h.repo.GetURLsByUser(r.Context(), userID)
+	urls, err := h.repo.GetURLsByUser(context.Background(), userID)
 	if err != nil {
 		h.logger.Error("GetURLsByUser failed", zap.Error(err))
 		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+
 	// Если URL нет — 204
 	if len(urls) == 0 {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
 	h.sendResponse(w, true, urls, http.StatusOK)
-}
-
-func userIDString(id uuid.UUID) string {
-	if id == uuid.Nil {
-		return "anonymous"
-	}
-	return id.String()
 }

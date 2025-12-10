@@ -45,13 +45,15 @@ func main() {
 	router.Use(middleware.Logging(logger))
 	router.Use(middleware.GzipMiddleware)
 
-	router.Route("/{id}", func(r chi.Router) {
-		r.Get("/", h.RedirectURL)
+	router.Get("/{id}", h.RedirectURL)
+
+	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
 	})
 
 	// Авторизованные роуты
 	router.Group(func(r chi.Router) {
-		r.Use(middleware.Auth())
+		r.Use(middleware.Auth(logger))
 		r.Get("/api/user/urls", h.GetUserURLs)
 	})
 

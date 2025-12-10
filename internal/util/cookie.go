@@ -55,8 +55,8 @@ func SetSignedCookie(w http.ResponseWriter, userID uuid.UUID) {
 		Name:     cookieName,
 		Value:    cookieValue,
 		Path:     "/",
-		HttpOnly: true, // защита от XSS
-		Secure:   true, // только https
+		HttpOnly: true,  // защита от XSS
+		Secure:   false, // только https
 		SameSite: http.SameSiteLaxMode,
 		// Не ставим Expires/MaxAge → сессионная кука (до закрытия браузера)
 		// Если хочешь постоянную — раскомментируй:
