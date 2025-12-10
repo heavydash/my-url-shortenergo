@@ -19,7 +19,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"go.uber.org/zap"
 
-	"github.com/go-chi/chi"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
@@ -195,9 +194,9 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
-	h.logger.Info("=== REDIRECT HANDLER CALLED ===", zap.String("path", r.URL.Path))
-	id := chi.URLParam(r, "id")
-	id = r.URL.Path[1:] // отрезаем первый слеш
+	h.logger.Info("Redirect handler called", zap.String("path", r.URL.Path))
+
+	id := strings.TrimPrefix(r.URL.Path, "/")
 	if id == "" {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
