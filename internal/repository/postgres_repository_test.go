@@ -16,7 +16,7 @@ func TestPostgresRepository(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := db.New(ctx, "postgres://praktikum:12345@localhost:8080/praktikum?sslmode=disable")
+	pool, err := db.New(ctx, "postgres://praktikum:12345@localhost:5432/praktikum?sslmode=disable")
 	require.NoError(t, err)
 	defer pool.Close()
 
