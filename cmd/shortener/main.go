@@ -52,7 +52,7 @@ func main() {
 			repo = repository.NewMemoryRepository()
 		} else {
 			logger.Info("using postgres storage")
-			repo = repository.NewPostgres(pool.Pool)
+			repo = repository.NewPostgresRepository(pool.Pool)
 		}
 	} else if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))

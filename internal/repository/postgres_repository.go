@@ -18,7 +18,7 @@ type PostgresRepository struct {
 	initErr  error
 }
 
-func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {
+func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
