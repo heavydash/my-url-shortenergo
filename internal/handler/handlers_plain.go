@@ -41,6 +41,12 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	h.logger.Info("IsDeleted", zap.Bool("deleted", urlModel.IsDeleted))
+	if urlModel.IsDeleted {
+		http.Error(w, "Gone", http.StatusGone)
+		return
+	}
+
 	http.Redirect(w, r, urlModel.OriginalURL, http.StatusTemporaryRedirect)
 }
 

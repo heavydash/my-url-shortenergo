@@ -82,6 +82,7 @@ func main() {
 	router.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(logger))
 		r.Get("/api/user/urls", h.GetUserURLs)
+		r.Delete("/api/user/urls", h.DeleteUrls)
 	})
 
 	// Анонимные

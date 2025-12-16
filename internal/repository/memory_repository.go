@@ -11,16 +11,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
-//go:generate mockgen -source=$GOFILE -destination=../repository/mocks/mock_repository.go -package=mocks
-type URLRepository interface {
-	SaveURL(m model.URLModel) (model.URLModel, error)
-	GetURL(id string) (model.URLModel, error)
-	SaveBatch(ctx context.Context, batch []model.URLModel) error
-	Clear() error
-	Ping(ctx context.Context) error
-	GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error)
-}
-
 type MemoryRepository struct {
 	mu   sync.Mutex
 	urls map[string]model.URLModel
@@ -107,7 +97,7 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 	baseURL := "http://localhost:8080"
 
 	for _, m := range m.urls {
-		if m.UserID == userID && !m.Deleted {
+		if m.UserID == userID && !m.IsDeleted {
 			result = append(result, model.URLModel{
 				ShortURL:    fmt.Sprintf("%s/%s", baseURL, m.ShortURL),
 				OriginalURL: m.OriginalURL,
@@ -115,4 +105,17 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 		}
 	}
 	return result, nil
+}
+
+func (m *MemoryRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, shortURL := range shortURLs {
+		if model, ok := m.urls[shortURL]; ok && model.UserID == userID {
+			model.IsDeleted = true
+			m.urls[shortURL] = model
+		}
+	}
+	return nil
 }

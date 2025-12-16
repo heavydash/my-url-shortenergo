@@ -7,5 +7,5 @@ type URLModel struct {
 	ShortURL    string    `json:"short_url"`
 	OriginalURL string    `json:"original_url"`
 	UserID      uuid.UUID `json:"-" db:"omitempty"`
-	Deleted     bool      `json:"-" db:"is_deleted"`
+	IsDeleted   bool      `json:"-" db:"is_deleted"`
 }

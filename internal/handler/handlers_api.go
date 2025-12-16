@@ -130,3 +130,24 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("encode batch response failed", zap.Error(err))
 	}
 }
+
+func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		h.sendError(w, true, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if len(ids) == 0 {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
+	go func() {
+		_ = h.repo.MarkAsDeleted(userID, ids)
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+}

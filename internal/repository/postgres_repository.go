@@ -22,7 +22,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
-func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
+func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	query := `
 		INSERT INTO urls (uuid, short_url, original_url, user_id)
 		VALUES ($1, $2, $3, $4)
@@ -31,7 +31,7 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	`
 
 	var returnedUUID, returnedShortURL string
-	err := r.pool.QueryRow(context.Background(), query,
+	err := p.pool.QueryRow(context.Background(), query,
 		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
 	).Scan(&returnedUUID, &returnedShortURL)
 
@@ -45,7 +45,7 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Конфликт ищем существующий
 		var existing model.URLModel
-		err = r.pool.QueryRow(context.Background(),
+		err = p.pool.QueryRow(context.Background(),
 			`SELECT uuid, short_url, original_url, user_id FROM urls WHERE original_url = $1`,
 			m.OriginalURL,
 		).Scan(&existing.UUID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID)
@@ -59,10 +59,16 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 
 	return model.URLModel{}, err
 }
-func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
+func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	var m model.URLModel
-	query := `SELECT uuid, short_url, original_url, user_id FROM urls WHERE uuid = $1`
-	err := r.pool.QueryRow(context.Background(), query, id).Scan(&m.UUID, &m.ShortURL, &m.OriginalURL, &m.UUID)
+	query := `SELECT uuid, short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1`
+	err := p.pool.QueryRow(context.Background(), query, id).Scan(
+		&m.UUID,
+		&m.ShortURL,
+		&m.OriginalURL,
+		&m.UserID,
+		&m.IsDeleted,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.URLModel{}, fmt.Errorf("url not found")
 	}
@@ -72,9 +78,9 @@ func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	return m, nil
 }
 
-func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -92,16 +98,16 @@ func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 	return tx.Commit(ctx)
 }
 
-func (r *PostgresRepository) Ping(ctx context.Context) error {
-	return r.pool.Ping(ctx)
+func (p *PostgresRepository) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
 }
 
-func (r *PostgresRepository) Clear() error {
-	_, err := r.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
+func (p *PostgresRepository) Clear() error {
+	_, err := p.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
 	return err
 }
 
-func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
 	if userID == uuid.Nil {
 		return []model.URLModel{}, nil
 	}
@@ -112,7 +118,7 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	WHERE user_id = $1 AND is_deleted = false
 	ORDER BY created_at DESC
 `
-	rows, err := r.pool.Query(ctx, query, userID)
+	rows, err := p.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get urls by user: query failed: %w", err)
 	}
@@ -136,4 +142,17 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 	return urls, nil
+}
+
+func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+	if len(shortURLs) == 0 {
+		return nil
+	}
+
+	query := `UPDATE urls SET is_deleted = true
+	WHERE short_url = ANY($1) AND user_id = $2
+
+`
+	_, err := p.pool.Exec(context.Background(), query, shortURLs, userID)
+	return err
 }
