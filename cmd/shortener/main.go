@@ -89,9 +89,15 @@ func main() {
 	router.Get("/ping", h.PingHandler)
 	router.Get("/", h.HomeHandler)
 
-	router.Post("/", h.ShortenPlainHandler)
-	router.Post("/api/shorten", h.ShortenJSONHandler)
-	router.Post("/api/shorten/batch", h.BatchShortenHandler)
+	router.Post("/", middleware.Auth(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ShortenHandler(w, r, false)
+	})).ServeHTTP)
+
+	router.Post("/api/shorten", middleware.Auth(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ShortenHandler(w, r, true)
+	})).ServeHTTP)
+
+	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP)
 
 	// Сервер
 	srv := &http.Server{

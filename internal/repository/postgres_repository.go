@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"sync"
+	"time"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
@@ -31,12 +32,6 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepo
 	p := &PostgresRepository{
 		pool:   pool,
 		logger: logger,
-	}
-	p.deleteCh = make(chan DeleteTask, 1000)
-
-	const workersCount = 8
-	for i := 0; i < workersCount; i++ {
-		go p.deleteWorker()
 	}
 
 	return p
@@ -167,16 +162,56 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 }
 
 func (p *PostgresRepository) deleteWorker() {
-	for task := range p.deleteCh {
-		p.logger.Info("deleteWorker: received task",
-			zap.String("user_id", task.UserID.String()),
-			zap.Int("urls_count", len(task.ShortURLs)))
+	type accumulatedTask struct {
+		userID uuid.UUID
+		urls   []string
+	}
 
-		if err := p.markAsDeletedBatch(task.UserID, task.ShortURLs); err != nil {
-			p.logger.Error("async delete failed",
-				zap.Error(err),
-				zap.Strings("short_urls", task.ShortURLs),
-				zap.String("user_id", task.UserID.String()))
+	var batch []accumulatedTask
+	timer := time.NewTimer(1 * time.Millisecond) // таймер на сброс батча
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		p.logger.Info("Flushing batch", zap.Int("tasks_count", len(batch)))
+
+		// Группируем по userID и делаем один UPDATE на юзера с большим массивом
+		byUser := make(map[uuid.UUID][]string)
+		for _, t := range batch {
+			byUser[t.userID] = append(byUser[t.userID], t.urls...)
+		}
+
+		for uid, urls := range byUser {
+			if err := p.markAsDeletedBatch(uid, urls); err != nil {
+				p.logger.Error("batch delete failed", zap.Error(err))
+			} else {
+				p.logger.Info("Deleted for user", zap.String("user_id", uid.String()),
+					zap.Int("urls_count", len(urls)))
+			}
+		}
+
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case task := <-p.deleteCh:
+			batch = append(batch, accumulatedTask{userID: task.UserID, urls: task.ShortURLs})
+
+			if len(batch) >= 1 {
+				flush()
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timer.Reset(50 * time.Millisecond)
+			}
+		case <-timer.C:
+			flush()
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(50 * time.Millisecond)
 		}
 	}
 }
@@ -185,13 +220,17 @@ func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string)
 	if len(shortURLs) == 0 {
 		return nil
 	}
-	p.logger.Info("MarkAsDeleted: sending to channel", zap.String("user_id", userID.String()), zap.Strings("short_urls", shortURLs))
-	p.deleteCh <- DeleteTask{UserID: userID, ShortURLs: shortURLs}
-	return nil
+	p.logger.Info("MarkAsDeleted: synchronous delete",
+		zap.String("user_id", userID.String()),
+		zap.Strings("short_urls", shortURLs))
+	return p.markAsDeletedBatch(userID, shortURLs)
 }
 
 func (p *PostgresRepository) markAsDeletedBatch(userID uuid.UUID, shortURLs []string) error {
-	p.logger.Info("markAsDeletedBatch: trying to delete", zap.String("user_id", userID.String()), zap.Strings("short_urls", shortURLs))
+	p.logger.Info("markAsDeletedBatch: START",
+		zap.String("user_id", userID.String()),
+		zap.Int("urls_count", len(shortURLs)))
+
 	if len(shortURLs) == 0 {
 		return nil
 	}
@@ -199,18 +238,19 @@ func (p *PostgresRepository) markAsDeletedBatch(userID uuid.UUID, shortURLs []st
 	query := `UPDATE urls 
 		SET is_deleted = true
 		WHERE short_url = ANY($1) 
-			AND user_id = $2
 			AND is_deleted = false
   		RETURNING short_url`
 
-	tag, err := p.pool.Exec(context.Background(), query, pq.Array(shortURLs), userID)
-	p.logger.Info("markAsDeletedBatch: result", zap.Int64("rows", tag.RowsAffected()))
+	tag, err := p.pool.Exec(context.Background(), query, pq.Array(shortURLs))
+
 	if err != nil {
-		p.logger.Error("update failed", zap.Error(err))
+		p.logger.Error("markAsDeletedBatch: EXEC FAILED", zap.Error(err))
 		return err
 	}
 
 	rowsAffected := tag.RowsAffected()
-	p.logger.Info("markAsDeletedBatch: successfully updated", zap.Int64("rows", rowsAffected))
+	p.logger.Info("markAsDeletedBatch: SUCCESS",
+		zap.Int64("rows_affected", rowsAffected),
+		zap.Strings("short_urls", shortURLs))
 	return nil
 }

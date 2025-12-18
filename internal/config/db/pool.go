@@ -17,7 +17,7 @@ func New(ctx context.Context, dsn string) (*Pool, error) {
 	}
 
 	//Pool params
-	config.MaxConns = 25
+	config.MaxConns = 20
 	config.MinConns = 5
 	config.MaxConnLifetime = 5 * time.Minute
 	config.HealthCheckPeriod = 1 * time.Minute
