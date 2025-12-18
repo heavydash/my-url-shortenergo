@@ -100,7 +100,6 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 		shortURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"), id)
 
 		batchModels = append(batchModels, model.URLModel{
-			UUID:        id,
 			ShortURL:    id,
 			OriginalURL: item.OriginalURL,
 			UserID:      userID,

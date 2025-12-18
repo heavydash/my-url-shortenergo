@@ -24,20 +24,21 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 
 func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	query := `
-		INSERT INTO urls (uuid, short_url, original_url, user_id)
+		INSERT INTO urls (id, short_url, original_url, user_id)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (original_url) DO NOTHING
-		RETURNING uuid, short_url
+		RETURNING id, short_url
 	`
 
-	var returnedUUID, returnedShortURL string
+	var returnedID uuid.UUID
+	var returnedShortURL string
 	err := p.pool.QueryRow(context.Background(), query,
-		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
-	).Scan(&returnedUUID, &returnedShortURL)
+		uuid.New(), m.ShortURL, m.OriginalURL, m.UserID,
+	).Scan(&returnedID, &returnedShortURL)
 
 	if err == nil {
 		// Успешно вставили
-		m.UUID = returnedUUID
+		m.ID = returnedID
 		m.ShortURL = returnedShortURL
 		return m, nil
 	}
@@ -46,9 +47,10 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 		// Конфликт ищем существующий
 		var existing model.URLModel
 		err = p.pool.QueryRow(context.Background(),
-			`SELECT uuid, short_url, original_url, user_id FROM urls WHERE original_url = $1`,
+			`SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE original_url = $1`,
 			m.OriginalURL,
-		).Scan(&existing.UUID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID)
+		).Scan(&existing.ID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID,
+			&existing.IsDeleted)
 
 		if err != nil {
 			return model.URLModel{}, err
@@ -61,9 +63,9 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 }
 func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	var m model.URLModel
-	query := `SELECT uuid, short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1`
+	query := `SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1`
 	err := p.pool.QueryRow(context.Background(), query, id).Scan(
-		&m.UUID,
+		&m.ID,
 		&m.ShortURL,
 		&m.OriginalURL,
 		&m.UserID,
@@ -88,8 +90,8 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 
 	b := &pgx.Batch{}
 	for _, m := range batch {
-		b.Queue("INSERT INTO urls (uuid, short_url, original_url, user_id) VALUES ($1, $2, $3, $4)",
-			m.UUID, m.ShortURL, m.OriginalURL, m.UUID)
+		b.Queue("INSERT INTO urls (id, short_url, original_url, user_id) VALUES ($1, $2, $3, $4)",
+			uuid.New(), m.ShortURL, m.OriginalURL, m.UserID)
 	}
 	br := tx.SendBatch(ctx, b)
 	if err = br.Close(); err != nil {
@@ -113,7 +115,7 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	}
 
 	query := `
-	SELECT uuid, short_url, original_url, is_deleted
+	SELECT id, short_url, original_url, is_deleted
 	FROM urls
 	WHERE user_id = $1 AND is_deleted = false
 	ORDER BY created_at DESC
@@ -130,7 +132,7 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	for rows.Next() {
 		var u model.URLModel
 		var deleted bool
-		if err := rows.Scan(&u.UUID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
+		if err := rows.Scan(&u.ID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
 			return nil, fmt.Errorf("get urls by user: scan failed: %w", err)
 		}
 		if !deleted {
