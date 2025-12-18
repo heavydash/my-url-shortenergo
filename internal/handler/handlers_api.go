@@ -133,11 +133,15 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
 
+	h.logger.Info("DeleteUrls: userID", zap.String("user_id", userID.String()))
+
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
 		h.sendError(w, true, "Bad request", http.StatusBadRequest)
 		return
 	}
+
+	h.logger.Info("DeleteUrls: ids", zap.Strings("ids", ids))
 
 	if len(ids) == 0 {
 		w.WriteHeader(http.StatusAccepted)
