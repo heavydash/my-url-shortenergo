@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -155,6 +156,11 @@ func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string)
 	WHERE short_url = ANY($1) AND user_id = $2
 
 `
-	_, err := p.pool.Exec(context.Background(), query, shortURLs, userID)
+	pgArr := pgtype.Array[string]{
+		Elements: shortURLs,
+		Valid:    true,
+	}
+
+	_, err := p.pool.Exec(context.Background(), query, pgArr, userID)
 	return err
 }
