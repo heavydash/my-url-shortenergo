@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
 )
 
 type DeleteTask struct {
@@ -32,8 +32,13 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepo
 		pool:   pool,
 		logger: logger,
 	}
-	p.deleteCh = make(chan DeleteTask, 100)
-	go p.deleteWorker()
+	p.deleteCh = make(chan DeleteTask, 1000)
+
+	const workersCount = 8
+	for i := 0; i < workersCount; i++ {
+		go p.deleteWorker()
+	}
+
 	return p
 }
 
@@ -163,8 +168,15 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 
 func (p *PostgresRepository) deleteWorker() {
 	for task := range p.deleteCh {
+		p.logger.Info("deleteWorker: received task",
+			zap.String("user_id", task.UserID.String()),
+			zap.Int("urls_count", len(task.ShortURLs)))
+
 		if err := p.markAsDeletedBatch(task.UserID, task.ShortURLs); err != nil {
-			p.logger.Error("async delete failed", zap.Error(err), zap.Strings("short_urls", task.ShortURLs), zap.String("user_id", task.UserID.String()))
+			p.logger.Error("async delete failed",
+				zap.Error(err),
+				zap.Strings("short_urls", task.ShortURLs),
+				zap.String("user_id", task.UserID.String()))
 		}
 	}
 }
@@ -173,24 +185,32 @@ func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string)
 	if len(shortURLs) == 0 {
 		return nil
 	}
+	p.logger.Info("MarkAsDeleted: sending to channel", zap.String("user_id", userID.String()), zap.Strings("short_urls", shortURLs))
 	p.deleteCh <- DeleteTask{UserID: userID, ShortURLs: shortURLs}
 	return nil
 }
 
 func (p *PostgresRepository) markAsDeletedBatch(userID uuid.UUID, shortURLs []string) error {
+	p.logger.Info("markAsDeletedBatch: trying to delete", zap.String("user_id", userID.String()), zap.Strings("short_urls", shortURLs))
 	if len(shortURLs) == 0 {
 		return nil
 	}
 
-	query := `UPDATE urls SET is_deleted = true WHERE short_url = ANY($1) AND user_id = $2`
+	query := `UPDATE urls 
+		SET is_deleted = true
+		WHERE short_url = ANY($1) 
+			AND user_id = $2
+			AND is_deleted = false
+  		RETURNING short_url`
 
-	var pgArr pgtype.Array[string]
-	pgArr.Elements = shortURLs
-	pgArr.Valid = true
-
-	_, err := p.pool.Exec(context.Background(), query, pgArr, userID)
+	tag, err := p.pool.Exec(context.Background(), query, pq.Array(shortURLs), userID)
+	p.logger.Info("markAsDeletedBatch: result", zap.Int64("rows", tag.RowsAffected()))
 	if err != nil {
 		p.logger.Error("update failed", zap.Error(err))
+		return err
 	}
-	return err
+
+	rowsAffected := tag.RowsAffected()
+	p.logger.Info("markAsDeletedBatch: successfully updated", zap.Int64("rows", rowsAffected))
+	return nil
 }
