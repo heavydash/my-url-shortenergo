@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	"sync"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -13,14 +12,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type DeleteTask struct {
+	UserID    uuid.UUID
+	ShortURLs []string
+}
+
 type PostgresRepository struct {
 	pool     *pgxpool.Pool
 	initOnce sync.Once
 	initErr  error
+	deleteCh chan DeleteTask
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+	p := &PostgresRepository{
+		pool: pool,
+	}
+	p.deleteCh = make(chan DeleteTask, 100)
+	go p.deleteWorker()
+	return p
 }
 
 func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
@@ -147,20 +157,24 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	return urls, nil
 }
 
+func (p *PostgresRepository) deleteWorker() {
+	for task := range p.deleteCh {
+		if err := p.markAsDeletedBatch(task.UserID, task.ShortURLs); err != nil {
+
+		}
+	}
+}
+
 func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
 	if len(shortURLs) == 0 {
 		return nil
 	}
+	p.deleteCh <- DeleteTask{UserID: userID, ShortURLs: shortURLs}
+	return nil
+}
 
-	query := `UPDATE urls SET is_deleted = true
-	WHERE short_url = ANY($1) AND user_id = $2
-
-`
-	pgArr := pgtype.Array[string]{
-		Elements: shortURLs,
-		Valid:    true,
-	}
-
-	_, err := p.pool.Exec(context.Background(), query, pgArr, userID)
+func (p *PostgresRepository) markAsDeletedBatch(userID uuid.UUID, shortURLs []string) error {
+	query := `UPDATE urls SET is_deleted = true WHERE short_url = ANY($1) AND user_id = $2`
+	_, err := p.pool.Exec(context.Background(), query, shortURLs, userID)
 	return err
 }
