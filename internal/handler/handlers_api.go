@@ -144,9 +144,11 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		_ = h.repo.MarkAsDeleted(userID, ids)
-	}()
+	if err := h.repo.MarkAsDeleted(userID, ids); err != nil {
+		h.logger.Error("MarkAsDeleted failed", zap.Error(err))
+		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 }
