@@ -33,7 +33,10 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepo
 		pool:   pool,
 		logger: logger,
 	}
+	p.deleteCh = make(chan DeleteTask, 1000)
 
+	logger.Info("STARTING SINGLE delete worker with fan-in")
+	go p.deleteWorker()
 	return p
 }
 
@@ -204,14 +207,14 @@ func (p *PostgresRepository) deleteWorker() {
 				if !timer.Stop() {
 					<-timer.C
 				}
-				timer.Reset(50 * time.Millisecond)
+				timer.Reset(1 * time.Millisecond)
 			}
 		case <-timer.C:
 			flush()
 			if !timer.Stop() {
 				<-timer.C
 			}
-			timer.Reset(50 * time.Millisecond)
+			timer.Reset(1 * time.Millisecond)
 		}
 	}
 }
