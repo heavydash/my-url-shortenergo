@@ -117,9 +117,18 @@ func main() {
 	signal.Notify(stop, os.Interrupt)
 	<-stop
 
-	logger.Info("shutting down...")
+	logger.Info("shutting down server...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	srv.Shutdown(ctx)
-	logger.Info("server stopped")
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Error("server shutdown failed", zap.Error(err))
+	}
+
+	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
+		if err := pgRepo.Close(); err != nil {
+			logger.Error("failed to close postgres repo", zap.Error(err))
+		}
+	}
+	logger.Info("server ")
 }
