@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
@@ -21,19 +23,54 @@ import (
 )
 
 type Handler struct {
-	repo   repository.URLRepository
-	cfg    *config.Config
-	logger *zap.Logger
+	repo    repository.URLRepository
+	cfg     *config.Config
+	logger  *zap.Logger
+	deleter *deleter.URLDeleter
 }
 
 func NewHandler(
 	repo repository.URLRepository,
 	cfg *config.Config,
-	logger *zap.Logger) *Handler {
+	logger *zap.Logger,
+) *Handler {
+	effectiveLogger := logger
+	if effectiveLogger == nil {
+		effectiveLogger = zap.NewNop()
+	}
+
+	// Параметры Deleter
+	bufferSize := 1000
+	flushInterval := 500 * time.Millisecond
+	maxBatchSize := 1000
+
+	if cfg != nil {
+		bufferSize = cfg.DeletionQueueBuffer
+		if cfg.DeletionFlushInterval > 0 {
+			flushInterval = cfg.DeletionFlushInterval
+		} else {
+			effectiveLogger.Warn("DeletionFlushInterval invalid or zero, using default 500ms")
+		}
+		maxBatchSize = cfg.DeletionMaxBatchSize
+	} else {
+		effectiveLogger.Info("Config is nil (likely in tests), using default Deleter params")
+	}
+
+	// создаем Deleter
+	del := deleter.NewURLDeleter(
+		repo,
+		effectiveLogger,
+		bufferSize,
+		flushInterval,
+		maxBatchSize,
+	)
+
 	return &Handler{
-		repo:   repo,
-		cfg:    cfg,
-		logger: logger}
+		repo:    repo,
+		cfg:     cfg,
+		logger:  effectiveLogger,
+		deleter: del,
+	}
 }
 
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
@@ -170,4 +207,11 @@ func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, stat
 	} else {
 		http.Error(w, msg, status)
 	}
+}
+
+func (h *Handler) Close() error {
+	if h.deleter != nil {
+		return h.deleter.Close()
+	}
+	return nil
 }

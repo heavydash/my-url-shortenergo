@@ -6,7 +6,8 @@ CREATE TABLE urls (
                       original_url text NOT NULL,
                       user_id uuid NOT NULL,
                       is_deleted boolean DEFAULT false,
-                      created_at timestamptz DEFAULT now()
+                      created_at timestamptz DEFAULT now(),
+                        deleted_at timestamptz
 );
 -- +goose StatementEnd
 

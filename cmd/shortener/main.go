@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -114,15 +115,19 @@ func main() {
 
 	// Gracefull shutdown
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
 	logger.Info("shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("server shutdown failed", zap.Error(err))
+	}
+
+	if err := h.Close(); err != nil {
+		logger.Error("deleter shutting down failed", zap.Error(err))
 	}
 
 	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
@@ -130,5 +135,5 @@ func main() {
 			logger.Error("failed to close postgres repo", zap.Error(err))
 		}
 	}
-	logger.Info("server ")
+	logger.Info("server stopped gracefully")
 }

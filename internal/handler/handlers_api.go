@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -131,15 +132,18 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
 
-	h.logger.Info("DeleteUrls: userID", zap.String("user_id", userID.String()))
-
+	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+	if !ok || userID == uuid.Nil {
+		h.sendError(w, true, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
 		h.sendError(w, true, "Bad request", http.StatusBadRequest)
 		return
 	}
+	h.logger.Info("DeleteUrls: received request", zap.Int("raw_ids_count", len(ids)))
 
 	h.logger.Info("DeleteUrls: ids", zap.Strings("ids", ids))
 
@@ -148,11 +152,20 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		if err := h.repo.MarkAsDeleted(userID, ids); err != nil {
-			h.logger.Error("MarkAsDeleted failed in background", zap.Error(err))
+	// Дедупликация ID
+	unique := make(map[string]bool)
+	var deduped []string
+	for _, id := range ids {
+		if !unique[id] {
+			unique[id] = true
+			deduped = append(deduped, id)
 		}
-	}()
+	}
+	// Отправляем задачу в Deleter
+	h.deleter.Submit(deleter.DeletionTask{
+		UserID:   userID,
+		ShortIDs: deduped,
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 }

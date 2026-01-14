@@ -5,14 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
-	"sync"
-	"time"
-
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
 type DeleteTask struct {
@@ -21,29 +18,15 @@ type DeleteTask struct {
 }
 
 type PostgresRepository struct {
-	pool     *pgxpool.Pool
-	initOnce sync.Once
-	initErr  error
-	deleteCh chan DeleteTask
-	logger   *zap.Logger
-	wg       *sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	pool   *pgxpool.Pool
+	logger *zap.Logger
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepository {
-	p := &PostgresRepository{
+	return &PostgresRepository{
 		pool:   pool,
 		logger: logger,
-		wg:     &sync.WaitGroup{},
 	}
-	p.deleteCh = make(chan DeleteTask, 1000)
-	p.ctx, p.cancel = context.WithCancel(context.Background())
-
-	logger.Info("STARTING SINGLE delete worker with fan-in")
-	p.wg.Add(1)
-	go p.deleteWorker(p.ctx)
-	return p
 }
 
 func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
@@ -170,132 +153,45 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	return urls, nil
 }
 
-func (p *PostgresRepository) deleteWorker(ctx context.Context) {
-	defer p.wg.Done()
-
-	type accumulatedTask struct {
-		userID uuid.UUID
-		urls   []string
-	}
-
-	var batch []accumulatedTask
-	timer := time.NewTimer(100 * time.Millisecond) // таймер на сброс батча
-
-	flush := func() {
-		if len(batch) == 0 {
-			return
-		}
-		p.logger.Info("Flushing batch", zap.Int("tasks_count", len(batch)))
-
-		// Группируем по userID и делаем один UPDATE на юзера с большим массивом
-		byUser := make(map[uuid.UUID][]string)
-		for _, t := range batch {
-			byUser[t.userID] = append(byUser[t.userID], t.urls...)
-		}
-
-		for uid, urls := range byUser {
-			if err := p.markAsDeletedBatch(uid, urls); err != nil {
-				p.logger.Error("batch delete failed", zap.Error(err))
-			} else {
-				p.logger.Info("Deleted for user", zap.String("user_id", uid.String()),
-					zap.Int("urls_count", len(urls)))
-			}
-		}
-
-		batch = batch[:0]
-	}
-
-	for {
-		select {
-		case task, ok := <-p.deleteCh:
-			if !ok {
-				flush()
-				return
-			}
-			batch = append(batch, accumulatedTask{userID: task.UserID, urls: task.ShortURLs})
-
-			if len(batch) >= 20 { // порог для накопления
-				flush()
-				if !timer.Stop() {
-					<-timer.C
-				}
-				timer.Reset(100 * time.Millisecond)
-			}
-		case <-timer.C:
-			flush()
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(100 * time.Millisecond)
-		case <-p.ctx.Done(): // сброс при shut down
-			flush()
-			return
-		}
-	}
-}
-
 func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+	p.logger.Info("repo: marking as deleted", zap.String("user_id", userID.String()), zap.Int("count", len(shortURLs)))
 	if len(shortURLs) == 0 {
 		return nil
 	}
-	p.logger.Info("MarkAsDeleted: sending to channel", zap.String("user_id",
-		userID.String()), zap.Strings("short_urls", shortURLs))
-	select {
-	case p.deleteCh <- DeleteTask{UserID: userID, ShortURLs: shortURLs}:
-		return nil
-	case <-p.ctx.Done():
-		return p.ctx.Err()
-	}
-}
-
-func (p *PostgresRepository) markAsDeletedBatch(userID uuid.UUID, shortURLs []string) error {
-	p.logger.Info("markAsDeletedBatch: START",
+	p.logger.Info("repo: marking as deleted",
 		zap.String("user_id", userID.String()),
-		zap.Int("urls_count", len(shortURLs)))
+		zap.Strings("short_urls", shortURLs),
+		zap.Strings("ids", shortURLs))
 
-	if len(shortURLs) == 0 {
-		return nil
+	const batchSize = 500 // защита от множеств параметров
+	for i := 0; i < len(shortURLs); i += batchSize {
+		end := i + batchSize
+		if end > len(shortURLs) {
+			end = len(shortURLs)
+		}
+		batch := shortURLs[i:end]
+
+		query := `
+		UPDATE urls SET is_deleted = TRUE, deleted_at = NOW()
+        WHERE user_id = $1 AND short_url = ANY($2) AND is_deleted = FALSE`
+		_, err := p.pool.Exec(context.Background(), query, userID, pq.Array(batch))
+		if err != nil {
+			p.logger.Error("mark as deleted failed", zap.Error(err))
+			return err
+		}
 	}
 
-	query := `UPDATE urls 
-		SET is_deleted = true
-		WHERE short_url = ANY($1)
-		AND is_deleted = false
-    RETURNING short_url 
-  		RETURNING short_url`
+	p.logger.Info("mark as deleted successfully",
+		zap.String("user_id", userID.String()),
+		zap.Int("count", len(shortURLs)))
 
-	tag, err := p.pool.Exec(context.Background(), query, pq.Array(shortURLs), userID)
-
-	if err != nil {
-		p.logger.Error("markAsDeletedBatch: EXEC FAILED", zap.Error(err))
-		return err
-	}
-
-	rowsAffected := tag.RowsAffected()
-	p.logger.Info("markAsDeletedBatch: SUCCESS",
-		zap.Int64("rows_affected", rowsAffected),
-		zap.Strings("short_urls", shortURLs))
 	return nil
 }
 
 func (p *PostgresRepository) Close() error {
-	p.cancel() // отменяем ctx
-
-	close(p.deleteCh) // закрываем канал
-
-	// Ждём воркер с таймаутом, чтоб не висеть бесконечно
-	done := make(chan struct{})
-	go func() {
-		p.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		p.logger.Info("repo closed gracefully")
-		return nil
-	case <-time.After(3 * time.Second):
-		p.logger.Warn("repo close timeout, forcing close")
-		return errors.New("repo close timeout")
+	if p.pool != nil {
+		p.pool.Close()
+		p.logger.Info("postgres: closed pool")
 	}
+	return nil
 }
