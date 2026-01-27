@@ -27,6 +27,10 @@ vendor/
 test_results*.txt
 test_results*.txt
 .env
-autotests/shortenertest
-cookie.txt
-autotests/.zshrc
+
+
+# Временные и тестовые файлы
+autotests/
+cookie*.txt
+*.log
+
