@@ -5,39 +5,47 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"sync"
-
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/lib/pq"
+	"go.uber.org/zap"
 )
 
+type DeleteTask struct {
+	UserID    uuid.UUID
+	ShortURLs []string
+}
+
 type PostgresRepository struct {
-	pool     *pgxpool.Pool
-	initOnce sync.Once
-	initErr  error
+	pool   *pgxpool.Pool
+	logger *zap.Logger
 }
 
-func NewPostgres(pool *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{pool: pool}
+func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepository {
+	return &PostgresRepository{
+		pool:   pool,
+		logger: logger,
+	}
 }
 
-func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
+func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	query := `
-		INSERT INTO urls (uuid, short_url, original_url, user_id)
+		INSERT INTO urls (id, short_url, original_url, user_id)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (original_url) DO NOTHING
-		RETURNING uuid, short_url
+		RETURNING id, short_url
 	`
 
-	var returnedUUID, returnedShortURL string
-	err := r.pool.QueryRow(context.Background(), query,
-		m.UUID, m.ShortURL, m.OriginalURL, m.UserID,
-	).Scan(&returnedUUID, &returnedShortURL)
+	var returnedID uuid.UUID
+	var returnedShortURL string
+	err := p.pool.QueryRow(context.Background(), query,
+		uuid.New(), m.ShortURL, m.OriginalURL, m.UserID,
+	).Scan(&returnedID, &returnedShortURL)
 
 	if err == nil {
 		// Успешно вставили
-		m.UUID = returnedUUID
+		m.ID = returnedID
 		m.ShortURL = returnedShortURL
 		return m, nil
 	}
@@ -45,10 +53,11 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Конфликт ищем существующий
 		var existing model.URLModel
-		err = r.pool.QueryRow(context.Background(),
-			`SELECT uuid, short_url, original_url, user_id FROM urls WHERE original_url = $1`,
+		err = p.pool.QueryRow(context.Background(),
+			`SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE original_url = $1`,
 			m.OriginalURL,
-		).Scan(&existing.UUID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID)
+		).Scan(&existing.ID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID,
+			&existing.IsDeleted)
 
 		if err != nil {
 			return model.URLModel{}, err
@@ -59,10 +68,16 @@ func (r *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 
 	return model.URLModel{}, err
 }
-func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
+func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	var m model.URLModel
-	query := `SELECT uuid, short_url, original_url, user_id FROM urls WHERE uuid = $1`
-	err := r.pool.QueryRow(context.Background(), query, id).Scan(&m.UUID, &m.ShortURL, &m.OriginalURL, &m.UUID)
+	query := `SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1`
+	err := p.pool.QueryRow(context.Background(), query, id).Scan(
+		&m.ID,
+		&m.ShortURL,
+		&m.OriginalURL,
+		&m.UserID,
+		&m.IsDeleted,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.URLModel{}, fmt.Errorf("url not found")
 	}
@@ -72,9 +87,9 @@ func (r *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 	return m, nil
 }
 
-func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -82,8 +97,8 @@ func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 
 	b := &pgx.Batch{}
 	for _, m := range batch {
-		b.Queue("INSERT INTO urls (uuid, short_url, original_url, user_id) VALUES ($1, $2, $3, $4)",
-			m.UUID, m.ShortURL, m.OriginalURL, m.UUID)
+		b.Queue("INSERT INTO urls (id, short_url, original_url, user_id) VALUES ($1, $2, $3, $4)",
+			uuid.New(), m.ShortURL, m.OriginalURL, m.UserID)
 	}
 	br := tx.SendBatch(ctx, b)
 	if err = br.Close(); err != nil {
@@ -92,27 +107,27 @@ func (r *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 	return tx.Commit(ctx)
 }
 
-func (r *PostgresRepository) Ping(ctx context.Context) error {
-	return r.pool.Ping(ctx)
+func (p *PostgresRepository) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
 }
 
-func (r *PostgresRepository) Clear() error {
-	_, err := r.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
+func (p *PostgresRepository) Clear() error {
+	_, err := p.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
 	return err
 }
 
-func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
 	if userID == uuid.Nil {
 		return []model.URLModel{}, nil
 	}
 
 	query := `
-	SELECT uuid, short_url, original_url, is_deleted
+	SELECT id, short_url, original_url, is_deleted
 	FROM urls
 	WHERE user_id = $1 AND is_deleted = false
 	ORDER BY created_at DESC
 `
-	rows, err := r.pool.Query(ctx, query, userID)
+	rows, err := p.pool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get urls by user: query failed: %w", err)
 	}
@@ -124,7 +139,7 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	for rows.Next() {
 		var u model.URLModel
 		var deleted bool
-		if err := rows.Scan(&u.UUID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
+		if err := rows.Scan(&u.ID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
 			return nil, fmt.Errorf("get urls by user: scan failed: %w", err)
 		}
 		if !deleted {
@@ -136,4 +151,47 @@ func (r *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 		return nil, err
 	}
 	return urls, nil
+}
+
+func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+	p.logger.Info("repo: marking as deleted", zap.String("user_id", userID.String()), zap.Int("count", len(shortURLs)))
+	if len(shortURLs) == 0 {
+		return nil
+	}
+	p.logger.Info("repo: marking as deleted",
+		zap.String("user_id", userID.String()),
+		zap.Strings("short_urls", shortURLs),
+		zap.Strings("ids", shortURLs))
+
+	const batchSize = 500 // защита от множеств параметров
+	for i := 0; i < len(shortURLs); i += batchSize {
+		end := i + batchSize
+		if end > len(shortURLs) {
+			end = len(shortURLs)
+		}
+		batch := shortURLs[i:end]
+
+		query := `
+		UPDATE urls SET is_deleted = TRUE, deleted_at = NOW()
+        WHERE user_id = $1 AND short_url = ANY($2) AND is_deleted = FALSE`
+		_, err := p.pool.Exec(context.Background(), query, userID, pq.Array(batch))
+		if err != nil {
+			p.logger.Error("mark as deleted failed", zap.Error(err))
+			return err
+		}
+	}
+
+	p.logger.Info("mark as deleted successfully",
+		zap.String("user_id", userID.String()),
+		zap.Int("count", len(shortURLs)))
+
+	return nil
+}
+
+func (p *PostgresRepository) Close() error {
+	if p.pool != nil {
+		p.pool.Close()
+		p.logger.Info("postgres: closed pool")
+	}
+	return nil
 }

@@ -28,7 +28,9 @@ test_results*.txt
 test_results*.txt
 .env
 
+
 # Временные и тестовые файлы
 autotests/
 cookie*.txt
 *.log
+

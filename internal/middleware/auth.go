@@ -32,14 +32,13 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 					logger.Warn("Auth: parse cookie failed", zap.Error(parseErr))
 					// Битая кука, создаём нового
 					userID = uuid.New()
+					util.SetSignedCookie(w, userID)
 				} else {
 					userID = parsedID
 					logger.Info("Auth: parsed userID", zap.String("user_id", userID.String()))
+					//нет SetSignedCookie - уже валидная
 				}
 			}
-
-			// Ставим куку, чтобы тест её увидел на следующем запросе
-			util.SetSignedCookie(w, userID)
 
 			ctx := context.WithValue(r.Context(), UserIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))

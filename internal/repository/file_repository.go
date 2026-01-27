@@ -135,7 +135,7 @@ func (r *FileRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([
 	baseURL := "http://localhost:8080"
 
 	for _, r := range r.urls {
-		if r.UserID == userID && !r.Deleted {
+		if r.UserID == userID && !r.IsDeleted {
 			result = append(result, model.URLModel{
 				ShortURL:    fmt.Sprintf("%s/%s", baseURL, r.ShortURL),
 				OriginalURL: r.OriginalURL,
@@ -143,4 +143,18 @@ func (r *FileRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([
 		}
 	}
 	return result, nil
+}
+
+func (r *FileRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, short := range shortURLs {
+		if model, ok := r.urls[short]; ok && model.UserID == userID {
+			model.IsDeleted = true
+			r.urls[short] = model
+		}
+	}
+
+	return nil
 }
