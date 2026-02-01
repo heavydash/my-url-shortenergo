@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/audit"
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"go.uber.org/zap"
 	"log"
 	"net/http"
@@ -47,6 +50,13 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Добавляем аудит
+	userIDstr := ""
+	if userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID); ok && userID != uuid.Nil {
+		userIDstr = userID.String()
+	}
+	h.auditSvc.SendAsync(audit.NewFollowEvent(userIDstr, urlModel.OriginalURL))
+
 	http.Redirect(w, r, urlModel.OriginalURL, http.StatusTemporaryRedirect)
 }
 
@@ -58,6 +68,6 @@ func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("OK")); err != nil {
-		h.logger.Error("writestring failed", zap.Error(err))
+		h.logger.Error("write string failed", zap.Error(err))
 	}
 }

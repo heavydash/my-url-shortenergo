@@ -14,54 +14,71 @@ type Config struct {
 	DatabaseDSN     string
 
 	// Поля для Deleter'а
-	DeletionQueueBuffer   int           `env:"DELETION_QUEUE_BUFFER"`
-	DeletionFlushInterval time.Duration `env:"DELETION_FLUSH_INTERVAL"`
-	DeletionMaxBatchSize  int           `env:"DELETION_MAX_BATCH_SIZE"`
+	DeletionQueueBuffer   int
+	DeletionFlushInterval time.Duration
+	DeletionMaxBatchSize  int
+
+	// Поля для Сервиса Аудита
+	AuditFilePath  string
+	AuditRemoteURL string
 }
 
 func NewConfig() (*Config, error) {
-	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs := flag.NewFlagSet("url-shortener", flag.ContinueOnError)
 
-	// Старые флаги
+	// Флаги серверные
 	a := fs.String("a", ":8080", "address to run HTTP server")
 	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
 	d := fs.String("d", "", "DSN to store the URL")
 
-	// Флаги для Deleter'а
+	// Флаги для Deleter
 	dq := fs.Int("dq", 1000, "deletion queue buffer size (default 1000)")
 	df := fs.String("df", "50ms", "deletion flush interval, e.g. 50ms, 1s (default 50ms)")
 	dm := fs.Int("dm", 1000, "deletion max batch size per user (default 1000)")
 
+	// Флаги для Audit
+	auditFileFlag := fs.String("audit-file", "", "path to audit log file")
+	auditURLFlag := fs.String("audit-url", "", "remote audit server URL")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, err
 	}
 
 	cfg := &Config{
-		ServerAddr:            *a,
-		BaseURL:               *b,
-		FileStoragePath:       *f,
-		DatabaseDSN:           *d,
+		ServerAddr:      *a,
+		BaseURL:         *b,
+		FileStoragePath: *f,
+		DatabaseDSN:     *d,
+		// Deleter
 		DeletionQueueBuffer:   *dq,
 		DeletionFlushInterval: parseDuration(*df, 50*time.Millisecond),
 		DeletionMaxBatchSize:  *dm,
+		// Audit
+		AuditFilePath:  *auditFileFlag,
+		AuditRemoteURL: *auditURLFlag,
 	}
 
-	// Перезапись env-переменными (приоритет env)
-	if addr, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
-		cfg.ServerAddr = addr
+	overwriteFromEnv(cfg)
+	return cfg, nil
+}
+
+// Перезапись env-переменными в отдельной функции
+func overwriteFromEnv(cfg *Config) {
+
+	if val, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
+		cfg.ServerAddr = val
 	}
-	if base, ok := os.LookupEnv("BASE_URL"); ok {
-		cfg.BaseURL = base
+	if val, ok := os.LookupEnv("BASE_URL"); ok {
+		cfg.BaseURL = val
 	}
-	if path, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
-		cfg.FileStoragePath = path
+	if val, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+		cfg.FileStoragePath = val
 	}
-	if dsn, ok := os.LookupEnv("DATABASE_DSN"); ok {
-		cfg.DatabaseDSN = dsn
+	if val, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = val
 	}
 
-	// Новые env
+	// Deleter
 	if val, ok := os.LookupEnv("DELETION_QUEUE_BUFFER"); ok {
 		if i, err := strconv.Atoi(val); err == nil && i > 0 {
 			cfg.DeletionQueueBuffer = i
@@ -78,7 +95,15 @@ func NewConfig() (*Config, error) {
 		}
 	}
 
-	return cfg, nil
+	// Аудит
+	if val, ok := os.LookupEnv("AUDIT_FILE"); ok {
+		cfg.AuditFilePath = val
+	}
+
+	if val, ok := os.LookupEnv("AUDIT_URL"); ok {
+		cfg.AuditRemoteURL = val
+	}
+
 }
 
 // Вспомогательная функция для парсинга duration из флага (с fallback)

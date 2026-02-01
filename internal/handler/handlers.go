@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/audit"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
@@ -23,16 +25,18 @@ import (
 )
 
 type Handler struct {
-	repo    repository.URLRepository
-	cfg     *config.Config
-	logger  *zap.Logger
-	deleter *deleter.URLDeleter
+	repo     repository.URLRepository
+	cfg      *config.Config
+	logger   *zap.Logger
+	deleter  *deleter.URLDeleter
+	auditSvc service.Service
 }
 
 func NewHandler(
 	repo repository.URLRepository,
 	cfg *config.Config,
 	logger *zap.Logger,
+	auditSvc service.Service,
 ) *Handler {
 	effectiveLogger := logger
 	if effectiveLogger == nil {
@@ -66,10 +70,11 @@ func NewHandler(
 	)
 
 	return &Handler{
-		repo:    repo,
-		cfg:     cfg,
-		logger:  effectiveLogger,
-		deleter: del,
+		repo:     repo,
+		cfg:      cfg,
+		logger:   effectiveLogger,
+		deleter:  del,
+		auditSvc: auditSvc,
 	}
 }
 
@@ -145,6 +150,14 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		saved.ShortURL)
 	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
 		fullURL))
+
+	// Добавляем аудит
+	userIDStr := ""
+	if userID != uuid.Nil {
+		userIDStr = userID.String()
+	}
+	h.auditSvc.SendAsync(audit.NewShortenEvent(userIDStr, reqURL))
+
 	if isJSON {
 		h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusCreated)
 	} else {

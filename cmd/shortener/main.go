@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
@@ -63,8 +64,10 @@ func main() {
 		repo = repository.NewMemoryRepository()
 	}
 
+	auditSvc := service.New(cfg, logger)
+
 	// Хендлер
-	h := handler.NewHandler(repo, cfg, logger)
+	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 
 	// Роутер
 	router := chi.NewRouter()
@@ -130,10 +133,20 @@ func main() {
 		logger.Error("deleter shutting down failed", zap.Error(err))
 	}
 
+	// Даем дописать и успешно shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := auditSvc.Shutdown(shutdownCtx); err != nil {
+		logger.Error("audit shutdown failed", zap.Error(err))
+	} else {
+		logger.Info("audit shutdown gracefully")
+	}
+
 	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
 		if err := pgRepo.Close(); err != nil {
 			logger.Error("failed to close postgres repo", zap.Error(err))
 		}
 	}
 	logger.Info("server stopped gracefully")
+
 }

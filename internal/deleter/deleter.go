@@ -25,12 +25,13 @@ type URLDeleter struct {
 	maxBatchSize  int
 }
 
-func NewURLDeleter( // переименовал для ясности
+func NewURLDeleter(
 	repo repository.URLRepository,
 	logger *zap.Logger,
 	bufferSize int,
 	flushInterval time.Duration,
 	maxBatchSize int,
+
 ) *URLDeleter {
 	ctx, cancel := context.WithCancel(context.Background())
 
