@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
+	_ "github.com/joho/godotenv/autoload"
+	"go.uber.org/zap"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -10,11 +14,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
-	_ "github.com/joho/godotenv/autoload"
-	"go.uber.org/zap"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
