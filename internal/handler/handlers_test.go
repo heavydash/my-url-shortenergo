@@ -361,3 +361,118 @@ func TestGetUserURLs_Empty(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 }
+
+// Бенчмарки
+// Создание новой короткой ссылки
+func BenchmarkShorten_NewURL(b *testing.B) {
+	repo := repository.NewMemoryRepository()
+	cfg := &config.Config{BaseURL: "http://localhost:8080"}
+	var logger *zap.Logger
+	logger = zap.NewNop()
+	auditNoop := service.Noop{}
+
+	h := NewHandler(repo, cfg, logger, auditNoop)
+
+	body := strings.NewReader(`{"url":"https://example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", body)
+	req.Header.Set("Content-Type", "text/plain")
+
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Body.Reset()
+		h.ShortenHandler(w, req, false)
+	}
+}
+
+// Повторное сокращение уже существующей ссылки
+func BenchmarkShorten_ExistingURL(b *testing.B) {
+	repo := repository.NewMemoryRepository()
+	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
+	logger := zap.NewNop()
+	auditNoop := &service.Noop{}
+
+	h := NewHandler(repo, cfg, logger, auditNoop)
+
+	body := strings.NewReader("https://example.com")
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	req.Header.Set("Content-Type", "text/plain")
+	w := httptest.NewRecorder()
+	h.ShortenHandler(w, req, false)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Body.Reset()
+		h.ShortenHandler(w, req, false)
+	}
+}
+
+// Редирект
+func BenchmarkResolve_Found(b *testing.B) {
+	repo := repository.NewMemoryRepository()
+	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
+	logger := zap.NewNop()
+	auditNoop := &service.Noop{}
+
+	h := NewHandler(repo, cfg, logger, auditNoop)
+
+	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Body.Reset()
+		h.RedirectURL(w, req)
+	}
+}
+
+// Несуществующий короткий код
+func BenchmarkResolve_NotFound(b *testing.B) {
+	repo := repository.NewMemoryRepository()
+	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
+	logger := zap.NewNop()
+	auditNoop := &service.Noop{}
+
+	h := NewHandler(repo, cfg, logger, auditNoop)
+
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent123", nil)
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Body.Reset()
+		h.RedirectURL(w, req)
+	}
+}
+
+// Batch
+func BenchmarkBatchShorten(b *testing.B) {
+	//start
+	repo := repository.NewMemoryRepository()
+	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
+	logger := zap.NewNop()
+	auditNoop := &service.Noop{}
+
+	h := NewHandler(repo, cfg, logger, auditNoop)
+
+	body := strings.NewReader(`[
+		{"correlation_id": "1", "original_url": "https://ya.ru"},
+		{"correlation_id": "2", "original_url": "https://google.com"},
+		{"correlation_id": "3", "original_url": "https://example.com"},
+	]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		w.Body.Reset()
+		h.BatchShortenHandler(w, req)
+	}
+}
