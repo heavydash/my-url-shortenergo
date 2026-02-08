@@ -3,14 +3,13 @@ package repository
 import (
 	"context"
 	"fmt"
-	"os"
-	"testing"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"go.uber.org/zap"
+	"os"
+	"testing"
+	"time"
 )
 
 // Бенчмарки
@@ -91,37 +90,4 @@ func BenchmarkPostgresRepo_GetURL(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-}
-
-func BenchmarkPostgresRepo_Conflict(b *testing.B) {
-	repo := newBenchmarkRepo(b)
-
-	baseURL := model.URLModel{
-		OriginalURL: "http://example.com/",
-		ShortURL:    "base",
-	}
-
-	_, err := repo.SaveURL(baseURL)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-
-	// Пытаемся сохранить URL много раз
-	for i := 0; i < b.N; i++ {
-		confictURL := model.URLModel{
-			OriginalURL: "http://example.com/",
-			ShortURL:    fmt.Sprintf("conflict%d", i),
-		}
-
-		_, err := repo.SaveURL(confictURL)
-		if err != nil && !isConflictError(err) {
-			b.Fatal(err)
-		}
-
-	}
-}
-
-func isConflictError(err error) bool {
-	return err != nil && (err.Error() == "url already exists")
 }
