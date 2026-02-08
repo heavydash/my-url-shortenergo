@@ -2,11 +2,12 @@ package deleter
 
 import (
 	"context"
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 type DeletionTask struct {

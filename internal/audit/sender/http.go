@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/audit"
-	"go.uber.org/zap"
 	"net/http"
 	"time"
+
+	"github.com/heavydash/my-url-shortenergo/internal/audit"
+	"go.uber.org/zap"
 )
 
 type HTTPSender struct {

@@ -1,9 +1,10 @@
 package migrations
 
 import (
+	"strings"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
-	"strings"
 )
 
 func RunMigrations(dsn string) error {

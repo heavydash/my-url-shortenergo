@@ -2,10 +2,11 @@ package sender
 
 import (
 	"encoding/json"
-	"github.com/heavydash/my-url-shortenergo/internal/audit"
-	"go.uber.org/zap"
 	"os"
 	"sync"
+
+	"github.com/heavydash/my-url-shortenergo/internal/audit"
+	"go.uber.org/zap"
 )
 
 type FileSender struct {

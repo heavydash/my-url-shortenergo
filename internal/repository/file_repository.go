@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"

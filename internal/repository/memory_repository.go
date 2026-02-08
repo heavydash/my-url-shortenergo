@@ -3,9 +3,10 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"

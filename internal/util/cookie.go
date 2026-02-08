@@ -4,10 +4,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"github.com/google/uuid"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const (

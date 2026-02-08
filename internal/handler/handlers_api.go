@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
@@ -11,8 +14,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"go.uber.org/zap"
-	"net/http"
-	"strings"
 )
 
 func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
@@ -166,6 +167,6 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		UserID:   userID,
 		ShortIDs: deduped,
 	})
-	
+
 	w.WriteHeader(http.StatusAccepted)
 }

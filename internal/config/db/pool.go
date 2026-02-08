@@ -2,8 +2,9 @@ package db
 
 import (
 	"context"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Pool struct {

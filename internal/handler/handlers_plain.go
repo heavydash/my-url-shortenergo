@@ -1,13 +1,14 @@
 package handler
 
 import (
+	"log"
+	"net/http"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"go.uber.org/zap"
-	"log"
-	"net/http"
-	"strings"
 )
 
 func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
