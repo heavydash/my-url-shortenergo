@@ -1,11 +1,12 @@
 package repository
 
 import (
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
 // Бенчмарки

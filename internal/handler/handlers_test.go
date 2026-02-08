@@ -5,6 +5,12 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
@@ -15,11 +21,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/repository/mocks"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
