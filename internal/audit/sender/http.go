@@ -1,3 +1,4 @@
+// Package sender предоставляет реализации отправителей аудит-событий.
 package sender
 
 import (
@@ -12,12 +13,59 @@ import (
 	"go.uber.org/zap"
 )
 
+// HTTPSender реализует отправку аудит-событий по HTTP протоколу.
+//
+// Особенности:
+//   - Отправка событий в формате JSON через HTTP POST
+//   - Таймаут запроса: 5 секунд (настраивается)
+//   - Проверка HTTP статус-кодов ответа
+//   - Автоматическая установка Content-Type: application/json
+//   - Контекст с таймаутом для предотвращения блокировок
+//
+// Используется для:
+//   - Интеграции с внешними системами мониторинга
+//   - Централизованного сбора аудит-логов
+//   - Отправки событий в SIEM системы (Splunk, ELK, Graylog)
+//   - Вебхуков и нотификаций
+//
+// Пример запроса:
+//
+//	POST /api/audit/events HTTP/1.1
+//	Content-Type: application/json
+//
+//	{
+//	  "timestamp": "2024-01-15T10:30:00Z",
+//	  "user_id": "user-123",
+//	  "action": "shorten",
+//	  "details": "{\"url\":\"https://example.com\"}"
+//	}
 type HTTPSender struct {
 	url    string
 	client *http.Client
 	logger *zap.Logger
 }
 
+// NewHTTPSender создает новый экземпляр HTTPSender.
+//
+// Инициализирует HTTP клиент с разумными таймаутами для production использования.
+// Рекомендуется использовать HTTPS протокол для защиты передаваемых данных.
+//
+// Параметры:
+//   - url: полный URL целевого эндпоинта (например, "https://audit.example.com/api/events")
+//   - logger: логгер для записи внутренних событий отправителя
+//
+// Возвращает:
+//   - *HTTPSender: готовый к использованию отправитель
+//
+// Пример использования:
+//
+//	logger, _ := zap.NewProduction()
+//	sender := sender.NewHTTPSender("https://audit.internal/api/events", logger)
+//
+//	// Использование с TLS сертификатами:
+//	// sender.client.Transport = &http.Transport{
+//	//     TLSClientConfig: &tls.Config{...}
+//	// }
 func NewHTTPSender(url string, logger *zap.Logger) *HTTPSender {
 	return &HTTPSender{
 		url: url,
@@ -28,10 +76,45 @@ func NewHTTPSender(url string, logger *zap.Logger) *HTTPSender {
 	}
 }
 
+// Name возвращает уникальное имя отправителя.
+// Используется для идентификации отправителя в логах и метриках.
+//
+// Возвращает:
+//   - string: имя в формате "http:{URL}"
+//
+// Пример:
+//
+//	sender.Name() // "http:https://audit.example.com/api/events"
 func (s *HTTPSender) Name() string {
 	return fmt.Sprintf("http:%s", s.url)
 }
 
+// Send отправляет аудит-событие на удаленный сервер по HTTP.
+//
+// Метод выполняет:
+//  1. Сериализацию события в JSON
+//  2. Создание HTTP POST запроса с контекстом
+//  3. Установку заголовка Content-Type: application/json
+//  4. Отправку запроса с таймаутом
+//  5. Проверку HTTP статус-кода ответа
+//  6. Логирование успешной отправки
+//
+// Параметры:
+//   - event: аудит-событие для отправки
+//
+// Возвращает:
+//   - error: ошибка если не удалось отправить событие
+//
+// Коды ошибок:
+//   - ошибки сериализации JSON
+//   - ошибки создания HTTP запроса
+//   - сетевые ошибки (таймаут, отказ соединения)
+//   - HTTP статус-коды не в диапазоне 2xx
+//
+// Пример успешного выполнения:
+//   - Отправляет событие на указанный URL
+//   - Возвращает nil если получен статус 2xx
+//   - Логирует debug сообщение об успешной отправке
 func (s *HTTPSender) Send(event *audit.Event) error {
 	// Сериализация события в JSON
 	data, err := json.Marshal(event)

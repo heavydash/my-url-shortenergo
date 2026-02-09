@@ -1,3 +1,16 @@
+// Package handler предоставляет HTTP-обработчики для сервиса сокращения URL.
+//
+// Основные эндпоинты:
+//
+//	POST /           - сокращение URL (plain text)
+//	POST /api/shorten - сокращение URL (JSON)
+//	GET  /{id}       - редирект по сокращенному URL
+//	GET  /ping       - проверка здоровья сервиса
+//	GET  /           - документация API
+//	POST /api/shorten/batch - пакетное сокращение URL
+//	GET  /api/user/urls - получение URL пользователя
+//
+// Все эндпоинты поддерживают gzip сжатие и логирование.
 package handler
 
 import (
@@ -25,6 +38,16 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
+// Handler содержит зависимости для обработки HTTP запросов сервиса сокращения URL.
+// Обрабатывает создание коротких URL, редиректы, пакетные операции и управление пользовательскими данными.
+//
+// Поля:
+//
+//	repo     - репозиторий для хранения URL (память, файл, PostgreSQL)
+//	cfg      - конфигурация приложения (базовый URL, настройки удаления)
+//	logger   - логгер для записи событий
+//	deleter  - асинхронный обработчик удаления URL
+//	auditSvc - сервис аудита для отслеживания операций
 type Handler struct {
 	repo     repository.URLRepository
 	cfg      *config.Config
@@ -33,6 +56,22 @@ type Handler struct {
 	auditSvc service.Service
 }
 
+// NewHandler создает новый экземпляр HTTP обработчика со всеми зависимостями.
+//
+// Параметры:
+//
+//	repo     - репозиторий для хранения URL (обязательно)
+//	cfg      - конфигурация приложения, может быть nil в тестах
+//	logger   - логгер, если nil будет создан no-op логгер
+//	auditSvc - сервис аудита, может быть nil
+//
+// Возвращает:
+//
+//	*Handler - готовый к использованию обработчик с инициализированным deleter
+//
+// Примечания:
+//   - Автоматически создает URLDeleter с настройками из конфига или значениями по умолчанию
+//   - Если cfg nil, использует дефолтные значения: bufferSize=1000, flushInterval=500ms, maxBatchSize=1000
 func NewHandler(
 	repo repository.URLRepository,
 	cfg *config.Config,
@@ -79,6 +118,29 @@ func NewHandler(
 	}
 }
 
+// ShortenHandler обрабатывает запросы на сокращение URL.
+// Внутренний метод, используется как ShortenPlainHandler и ShortenJSONHandler.
+//
+// Параметры:
+//
+//	w       - ResponseWriter для записи ответа
+//	r       - Request с телом запроса
+//	isJSON  - true для JSON формата, false для plain text
+//
+// Логика работы:
+//  1. Парсит URL из тела запроса (JSON или plain text)
+//  2. Валидирует URL формат
+//  3. Получает/генерирует userID из cookies
+//  4. Генерирует уникальный короткий ID
+//  5. Сохраняет в репозиторий
+//  6. Возвращает полный сокращенный URL
+//
+// Коды ответа:
+//
+//	201 Created - URL успешно сокращен
+//	400 Bad Request - невалидный URL или тело запроса
+//	409 Conflict - URL уже существует (возвращает существующий короткий URL)
+//	500 Internal Server Error - ошибка генерации ID или сохранения
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
 	h.logger.Info("ShortenHandler: request started", zap.Bool("isJSON", isJSON))
 	//Парсинг запроса
@@ -166,6 +228,13 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	}
 }
 
+// parseRequestBody парсит тело HTTP запроса в зависимости от формата (JSON или plain text).
+// Используется внутренне в ShortenHandler.
+//
+// Возвращает:
+//
+//	string - распарсенный URL
+//	error  - ошибка парсинга или чтения тела
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -183,6 +252,12 @@ func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error)
 	return string(body), nil
 }
 
+// isValidURL проверяет валидность URL строки.
+// Проверяет наличие схемы (http:// или https://) и корректность формата.
+//
+// Возвращает:
+//
+//	bool - true если URL валиден, false в противном случае
 func (h *Handler) isValidURL(u string) bool {
 	if u == "" || (!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://")) {
 		return false
@@ -191,6 +266,8 @@ func (h *Handler) isValidURL(u string) bool {
 	return err == nil
 }
 
+// sendResponse отправляет HTTP ответ в правильном формате (JSON или plain text).
+// Используется для успешных ответов от обработчиков.
 func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, data any, status int) {
 	if isJSON {
 		w.Header().Set("Content-Type", "application/json")
@@ -212,6 +289,7 @@ func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, data any, sta
 	_, _ = w.Write([]byte(str))
 }
 
+// sendError отправляет HTTP ответ с ошибкой в правильном формате (JSON или plain text).
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
 	if isJSON {
 		resp := map[string]string{"error": msg}
@@ -223,6 +301,12 @@ func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, stat
 	}
 }
 
+// Close освобождает ресурсы обработчика, останавливая deleter.
+// Должен вызываться при завершении работы приложения.
+//
+// Возвращает:
+//
+//	error - ошибка остановки deleter, если возникла
 func (h *Handler) Close() error {
 	if h.deleter != nil {
 		return h.deleter.Close()
