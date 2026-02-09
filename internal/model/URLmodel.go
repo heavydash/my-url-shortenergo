@@ -1,12 +1,83 @@
+// URLModel представляет URL в системе хранения (база данных, файл, память).
+//
+// Структура используется для:
+//   - Хранения в базе данных (tags db:"...")
+//   - Внутренней бизнес-логики
+//   - Сериализации в JSON при необходимости
+//
+// Соответствует таблице в БД (если используется SQL):
+//
+//	CREATE TABLE urls (
+//	  id           UUID PRIMARY KEY,
+//	  short_url    VARCHAR(50) UNIQUE NOT NULL,
+//	  original_url TEXT NOT NULL,
+//	  user_id      UUID NOT NULL,
+//	  is_deleted   BOOLEAN DEFAULT FALSE,
+//	  created_at   TIMESTAMP DEFAULT NOW()
+//	);
 package model
 
 import "github.com/google/uuid"
 
 type URLModel struct {
-	ID          uuid.UUID `db:"id"`
-	UUID        string    `json:"uuid,omitempty"`
-	ShortURL    string    `json:"short_url"`
-	OriginalURL string    `json:"original_url"`
-	UserID      uuid.UUID `json:"-" db:"omitempty"`
-	IsDeleted   bool      `json:"-" db:"is_deleted"`
+
+	// ID уникальный идентификатор записи в базе данных.
+	//
+	// Генерируется базой данных (autoincrement) или приложением.
+	// Используется как первичный ключ для JOIN операций.
+	//
+	// Особенности:
+	//   - Не используется в публичных API (клиенты не видят)
+	//   - UUID v4 для распределенных систем
+	//   - Может быть заменен на BIGSERIAL для PostgreSQL
+	ID uuid.UUID `db:"id"`
+
+	// UUID содержит строковое представление ID для JSON сериализации.
+	//
+	// Опциональное поле, используется если нужно вернуть ID
+	// в JSON ответах. В большинстве случаев не используется.
+	//
+	// Пример: "550e8400-e29b-41d4-a716-446655440000"
+	UUID string `json:"uuid,omitempty"`
+
+	// ShortURL содержит сокращенный идентификатор URL.
+	//
+	// Формат: короткая строка (6-8 символов) из [a-zA-Z0-9]
+	// Пример: "abc123", "XyZ789"
+	//
+	// Используется в:
+	//   - Публичных ссылках: http://short.ly/{short_url}
+	//   - Поиске URL в репозитории
+	//   - Уникальный индекс в базе данных
+	ShortURL string `json:"short_url"`
+
+	// OriginalURL содержит оригинальный (длинный) URL.
+	//
+	// Сохраняется "как есть" от пользователя.
+	// Максимальная длина зависит от БД (TEXT или VARCHAR(2000)).
+	//
+	// Пример: "https://example.com/very/long/path?query=value"
+	OriginalURL string `json:"original_url"`
+
+	// UserID идентификатор пользователя, создавшего сокращение.
+	//
+	// JSON тег "-" означает, что поле никогда не сериализуется в JSON.
+	// DB тег "omitempty" (если поддерживается) для условной вставки.
+	//
+	// Используется для:
+	//   - Привязки URL к пользователю
+	//   - Фильтрации URL в API пользователя
+	//   - Аудит логов и статистики
+	UserID uuid.UUID `json:"-" db:"omitempty"`
+
+	// IsDeleted флаг мягкого удаления (soft delete).
+	//
+	// Когда пользователь "удаляет" URL, он помечается как удаленный,
+	// но запись остается в базе для статистики и аудита.
+	//
+	// Поведение при IsDeleted = true:
+	//   - URL не возвращается в списках пользователя
+	//   - Редиректы возвращают HTTP 410 Gone
+	//   - Данные сохраняются для аналитики
+	IsDeleted bool `json:"-" db:"is_deleted"`
 }

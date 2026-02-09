@@ -1,3 +1,6 @@
+// Package service предоставляет основную реализацию сервиса аудита.
+// Сервис реализует асинхронную обработку аудит-событий с буферизацией,
+// поддержкой multiple sender'ов и graceful shutdown.
 package service
 
 import (
@@ -11,7 +14,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// Основная асинхронная реализация Аудита
+// AuditService реализует асинхронный сервис аудита с буферизацией событий.
+//
+// Архитектура:
+//   - Producer-Consumer паттерн с буферизированным каналом
+//   - Асинхронная обработка (не блокирует основной поток)
+//   - Поддержка multiple sender'ов (файл, HTTP, и т.д.)
+//   - Graceful shutdown с drain'ом очереди
+//   - Защита от race condition через sync.Once
+//
+// Основные компоненты:
+//   - eventCh: буферизированный канал для событий (capacity: 4096)
+//   - worker: горутина-обработчик событий
+//   - senders: список отправителей для доставки событий
+//   - shutdown/closed: каналы для graceful shutdown
+//
+// Пример потока данных:
+//  1. Handler вызывает SendAsync(event)
+//  2. Событие помещается в eventCh
+//  3. Worker читает события из канала
+//  4. Worker отправляет событие во все зарегистрированные sender'ы
+//  5. Sender'ы доставляют события в целевые системы
 type AuditService struct {
 	cfg      *config.Config
 	logger   *zap.Logger
@@ -22,7 +45,34 @@ type AuditService struct {
 	closed   chan struct{}     // сигнал завершения воркера
 }
 
-// Эксземпляр сервиса аудита
+// NewAuditService создает и запускает новый экземпляр AuditService.
+//
+// Автоматически инициализирует sender'ы на основе конфигурации:
+//   - FileSender: если config.AuditFilePath не пустой
+//   - HTTPSender: если config.AuditRemoteURL не пустой
+//
+// Запускает фоновую горутину (worker) для обработки событий.
+// Гарантирует однократный запуск worker'а даже при множественных вызовах.
+//
+// Параметры:
+//   - cfg: конфигурация приложения (используются поля AuditFilePath и AuditRemoteURL)
+//   - logger: структурированный логгер для записи событий сервиса
+//
+// Возвращает:
+//   - *AuditService: готовый к использованию сервис аудита
+//
+// Пример использования:
+//
+//	cfg := config.Load()
+//	logger, _ := zap.NewProduction()
+//	auditSvc := service.NewAuditService(cfg, logger)
+//	defer auditSvc.Shutdown(context.Background())
+//
+//	// Использование в обработчиках:
+//	handler := func(w http.ResponseWriter, r *http.Request) {
+//	    event := audit.NewShortenEvent(userID, url)
+//	    auditSvc.SendAsync(event)
+//	}
 func NewAuditService(cfg *config.Config, logger *zap.Logger) *AuditService {
 	s := &AuditService{
 		cfg:      cfg,
@@ -55,7 +105,32 @@ func NewAuditService(cfg *config.Config, logger *zap.Logger) *AuditService {
 	return s
 }
 
-// Добавление события в очередь
+// SendAsync асинхронно отправляет аудит-событие на обработку.
+//
+// Метод помещает событие в буферизированную очередь и немедленно возвращает управление.
+// Это позволяет не блокировать основной поток приложения даже при медленных sender'ах.
+//
+// Параметры:
+//   - event: аудит-событие для записи. Если nil - игнорируется с debug логом.
+//
+// Особенности:
+//   - Не блокирующий вызов (если буфер не полон)
+//   - Thread-safe - поддерживает конкурентные вызовы из нескольких горутин
+//   - При переполнении буфера выводится warning и событие отбрасывается
+//   - Во время shutdown новые события игнорируются
+//
+// Пример использования:
+//
+//	func SomeHandler(userID string, url string) {
+//	    event := &audit.Event{
+//	        Timestamp: time.Now(),
+//	        UserID:    userID,
+//	        Action:    "shorten",
+//	        URL:       url,
+//	    }
+//	    auditSvc.SendAsync(event) // не блокирует
+//	    // продолжение обработки запроса...
+//	}
 func (s *AuditService) SendAsync(event *audit.Event) {
 	if event == nil {
 		s.logger.Debug("nil event received")
@@ -77,7 +152,40 @@ func (s *AuditService) SendAsync(event *audit.Event) {
 	}
 }
 
-// Gracefull Shutdown
+// Shutdown выполняет graceful shutdown сервиса аудита.
+//
+// Процесс shutdown:
+//   1. Прекращает прием новых событий
+//   2. Дожидается обработки всех событий в буфере
+//   3. Закрывает все sender'ы (файлы, соединения)
+//   4. Гарантирует освобождение ресурсов
+//
+// Параметры:
+//   - ctx: контекст с таймаутом для ограничения времени shutdown
+//
+// Возвращает:
+//   - error: ошибка если shutdown превысил таймаут контекста
+//
+// Пример использования:
+//     // Основная функция приложения
+//     func main() {
+//         auditSvc := service.NewAuditService(cfg, logger)
+//
+//         // Обработка сигналов завершения
+//         sigCh := make(chan os.Signal, 1)
+//         signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+//
+//         <-sigCh // получен сигнал завершения
+//
+//         // Graceful shutdown с таймаутом 10 секунд
+//         ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//         defer cancel()
+//
+//         if err := auditSvc.Shutdown(ctx); err != nil {
+//             logger.Error("audit shutdown failed", zap.Error(err))
+//         }
+//     }
+
 func (s *AuditService) Shutdown(ctx context.Context) error {
 	s.logger.Info("audit service shutdown")
 
@@ -96,7 +204,24 @@ func (s *AuditService) Shutdown(ctx context.Context) error {
 	}
 }
 
-// worker goroutine
+// worker - фоновый обработчик аудит-событий.
+//
+// Горутина выполняет:
+//  1. Чтение событий из буферизированного канала
+//  2. Отправку каждого события во все зарегистрированные sender'ы
+//  3. Обработку graceful shutdown с drain'ом очереди
+//  4. Корректное закрытие sender'ов
+//
+// Внутренняя логика:
+//   - Бесконечный цикл с select по каналам
+//   - При shutdown: обработка оставшихся событий (drain)
+//   - Закрытие всех sender'ов, реализующих интерфейс Closer
+//   - Защита от паники (рекомендуется добавить recover)
+//
+// Примечания для разработки:
+//   - Worker гарантированно запускается один раз через sync.Once
+//   - При панике worker'а сервис перестает обрабатывать события
+//   - Рассмотрите добавление метрик: обработки/сек, ошибок отправки
 func (s *AuditService) worker() {
 	defer close(s.closed)
 	defer s.logger.Info("audit worker shutdown")
