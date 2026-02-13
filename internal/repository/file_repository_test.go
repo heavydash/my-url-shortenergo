@@ -15,7 +15,7 @@ func TestFileRepository(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())
 
-	repo := NewFileRepository(tmpFile.Name())
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)
 
 	url := model.URLModel{
@@ -41,7 +41,7 @@ func TestFileRepository_GetURL_Found(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())
 
-	repo := NewFileRepository(tmpFile.Name())
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)
 
 	// Сначала сохраняем
@@ -68,7 +68,7 @@ func TestFileRepository_GetURL_NotFound(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())
 
-	repo := NewFileRepository(tmpFile.Name())
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)
 	// defer repo.Close() // Убрали
 

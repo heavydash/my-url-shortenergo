@@ -42,8 +42,9 @@ type DeleteTask struct {
 //   - Систем с большим объемом данных
 //   - Распределенных приложений
 type PostgresRepository struct {
-	pool   *pgxpool.Pool
-	logger *zap.Logger
+	pool    *pgxpool.Pool
+	logger  *zap.Logger
+	baseURL string
 }
 
 // NewPostgresRepository создает новый PostgreSQL репозиторий.
@@ -71,10 +72,11 @@ type PostgresRepository struct {
 //   - Рекомендуется использовать connection pooling в production
 //   - max_connections в соответствии с нагрузкой
 //   - Close() при завершении работы
-func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger) *PostgresRepository {
+func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL string) *PostgresRepository {
 	return &PostgresRepository{
-		pool:   pool,
-		logger: logger,
+		pool:    pool,
+		logger:  logger,
+		baseURL: baseURL,
 	}
 }
 
@@ -313,7 +315,7 @@ func (p *PostgresRepository) Clear() error {
 //
 // Примечания:
 //   - Для uuid.Nil возвращает пустой слайс
-//   - BaseURL хардкодный (localhost:8080) - нужно вынести в конфигурацию
+//   - BaseURL берется из конфигурации и передается при создании репозитория
 //   - Возвращает только URL с is_deleted = false
 func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
 	if userID == uuid.Nil {
@@ -333,7 +335,6 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	defer rows.Close()
 
 	var urls []model.URLModel
-	baseURL := "http://localhost:8080"
 
 	for rows.Next() {
 		var u model.URLModel
@@ -342,7 +343,7 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 			return nil, fmt.Errorf("get urls by user: scan failed: %w", err)
 		}
 		if !deleted {
-			u.ShortURL = fmt.Sprintf("%s/%s", baseURL, u.ShortURL)
+			u.ShortURL = fmt.Sprintf("%s/%s", p.baseURL, u.ShortURL)
 			urls = append(urls, u)
 		}
 	}

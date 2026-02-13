@@ -45,6 +45,7 @@ type FileRepository struct {
 	file    *os.File
 	encoder *json.Encoder
 	urls    map[string]model.URLModel
+	baseURL string
 }
 
 // NewFileRepository создает новый FileRepository и загружает данные из файла.
@@ -57,6 +58,7 @@ type FileRepository struct {
 //
 // Параметры:
 //   - path: путь к файлу хранилища (например, "/data/urls.json")
+//   - baseURL: базовый URL для формирования коротких ссылок (например, "http://localhost:8080")
 //
 // Возвращает:
 //   - *FileRepository: готовый к использованию репозиторий
@@ -74,7 +76,7 @@ type FileRepository struct {
 //   - Файл создается с правами 0644 (rw-r--r--)
 //   - Режим O_APPEND гарантирует атомарную запись
 //   - Рекомендуется использовать абсолютные пути
-func NewFileRepository(path string) *FileRepository {
+func NewFileRepository(path string, baseURL string) *FileRepository {
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		panic(err)
@@ -83,6 +85,7 @@ func NewFileRepository(path string) *FileRepository {
 		file:    file,
 		encoder: json.NewEncoder(file),
 		urls:    make(map[string]model.URLModel),
+		baseURL: baseURL,
 	}
 	repo.loadFromFile()
 	return repo
@@ -332,13 +335,12 @@ func (r *FileRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([
 	}
 
 	var result []model.URLModel
-	baseURL := "http://localhost:8080"
 
-	for _, r := range r.urls {
-		if r.UserID == userID && !r.IsDeleted {
+	for _, url := range r.urls {
+		if url.UserID == userID && !url.IsDeleted {
 			result = append(result, model.URLModel{
-				ShortURL:    fmt.Sprintf("%s/%s", baseURL, r.ShortURL),
-				OriginalURL: r.OriginalURL,
+				ShortURL:    fmt.Sprintf("%s/%s", r.baseURL, url.ShortURL),
+				OriginalURL: url.OriginalURL,
 			})
 		}
 	}

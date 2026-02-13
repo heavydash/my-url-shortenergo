@@ -38,8 +38,9 @@ import (
 //   - Потребление памяти растет с количеством URL
 //   - Не подходит для production с большим объемом данных
 type MemoryRepository struct {
-	mu   sync.Mutex
-	urls map[string]model.URLModel
+	mu      sync.Mutex
+	urls    map[string]model.URLModel
+	baseURL string
 }
 
 // NewMemoryRepository создает новый in-memory репозиторий.
@@ -64,9 +65,10 @@ type MemoryRepository struct {
 //   - Данные существуют только во время работы приложения
 //   - Нет persistence между запусками
 //   - Идеален для тестов благодаря изоляции
-func NewMemoryRepository() *MemoryRepository {
+func NewMemoryRepository(baseURL string) *MemoryRepository {
 	return &MemoryRepository{
-		urls: make(map[string]model.URLModel),
+		urls:    make(map[string]model.URLModel),
+		baseURL: baseURL,
 	}
 }
 
@@ -271,7 +273,7 @@ func (m *MemoryRepository) Ping(ctx context.Context) error {
 // Примечания:
 //   - Возвращает только не удаленные URL (IsDeleted = false)
 //   - Для uuid.Nil возвращает пустой слайс
-//   - Преобразование shortURL добавляет хардкодный baseURL
+//   - Преобразование shortURL использует baseURL из конфигурации
 func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -281,13 +283,12 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 	}
 
 	var result []model.URLModel
-	baseURL := "http://localhost:8080"
 
-	for _, m := range m.urls {
-		if m.UserID == userID && !m.IsDeleted {
+	for _, url := range m.urls {
+		if url.UserID == userID && !url.IsDeleted {
 			result = append(result, model.URLModel{
-				ShortURL:    fmt.Sprintf("%s/%s", baseURL, m.ShortURL),
-				OriginalURL: m.OriginalURL,
+				ShortURL:    fmt.Sprintf("%s/%s", m.baseURL, url.ShortURL),
+				OriginalURL: url.OriginalURL,
 			})
 		}
 	}

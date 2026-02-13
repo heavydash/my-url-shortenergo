@@ -17,18 +17,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
@@ -83,30 +81,13 @@ func NewHandler(
 		effectiveLogger = zap.NewNop()
 	}
 
-	// Параметры Deleter
-	bufferSize := 1000
-	flushInterval := 500 * time.Millisecond
-	maxBatchSize := 1000
-
-	if cfg != nil {
-		bufferSize = cfg.DeletionQueueBuffer
-		if cfg.DeletionFlushInterval > 0 {
-			flushInterval = cfg.DeletionFlushInterval
-		} else {
-			effectiveLogger.Warn("DeletionFlushInterval invalid or zero, using default 500ms")
-		}
-		maxBatchSize = cfg.DeletionMaxBatchSize
-	} else {
-		effectiveLogger.Info("Config is nil (likely in tests), using default Deleter params")
-	}
-
 	// создаем Deleter
 	del := deleter.NewURLDeleter(
 		repo,
 		effectiveLogger,
-		bufferSize,
-		flushInterval,
-		maxBatchSize,
+		cfg.DeletionQueueBuffer,
+		cfg.DeletionFlushInterval,
+		cfg.DeletionMaxBatchSize,
 	)
 
 	return &Handler{

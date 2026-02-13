@@ -40,9 +40,14 @@ import (
 //	  "details": "{\"url\":\"https://example.com\"}"
 //	}
 type HTTPSender struct {
-	url    string
-	client *http.Client
-	logger *zap.Logger
+	url     string
+	client  *http.Client
+	logger  *zap.Logger
+	timeout time.Duration
+}
+
+func (s *HTTPSender) Close() error {
+	return nil
 }
 
 // NewHTTPSender создает новый экземпляр HTTPSender.
@@ -51,7 +56,9 @@ type HTTPSender struct {
 // Рекомендуется использовать HTTPS протокол для защиты передаваемых данных.
 //
 // Параметры:
+//
 //   - url: полный URL целевого эндпоинта (например, "https://audit.example.com/api/events")
+//   - timeout: таймаут HTTP запроса из cfg.HTTPClientTimeout
 //   - logger: логгер для записи внутренних событий отправителя
 //
 // Возвращает:
@@ -62,15 +69,16 @@ type HTTPSender struct {
 //	logger, _ := zap.NewProduction()
 //	sender := sender.NewHTTPSender("https://audit.internal/api/events", logger)
 //
-//	// Использование с TLS сертификатами:
-//	// sender.client.Transport = &http.Transport{
-//	//     TLSClientConfig: &tls.Config{...}
-//	// }
-func NewHTTPSender(url string, logger *zap.Logger) *HTTPSender {
+// Пример использования:
+//
+//	logger, _ := zap.NewProduction()
+//	sender := sender.NewHTTPSender("https://audit.internal/api/events", cfg.HTTPClientTimeout, logger)
+func NewHTTPSender(url string, timeout time.Duration, logger *zap.Logger) *HTTPSender {
 	return &HTTPSender{
-		url: url,
+		url:     url,
+		timeout: timeout,
 		client: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: timeout,
 		},
 		logger: logger.Named("http-sender"),
 	}
@@ -104,17 +112,6 @@ func (s *HTTPSender) Name() string {
 //
 // Возвращает:
 //   - error: ошибка если не удалось отправить событие
-//
-// Коды ошибок:
-//   - ошибки сериализации JSON
-//   - ошибки создания HTTP запроса
-//   - сетевые ошибки (таймаут, отказ соединения)
-//   - HTTP статус-коды не в диапазоне 2xx
-//
-// Пример успешного выполнения:
-//   - Отправляет событие на указанный URL
-//   - Возвращает nil если получен статус 2xx
-//   - Логирует debug сообщение об успешной отправке
 func (s *HTTPSender) Send(event *audit.Event) error {
 	// Сериализация события в JSON
 	data, err := json.Marshal(event)

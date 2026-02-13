@@ -5,11 +5,11 @@ package service
 
 import (
 	"context"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
 	"sync"
 	"time"
 
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"go.uber.org/zap"
 )
@@ -47,16 +47,10 @@ type AuditService struct {
 
 // NewAuditService создает и запускает новый экземпляр AuditService.
 //
-// Автоматически инициализирует sender'ы на основе конфигурации:
-//   - FileSender: если config.AuditFilePath не пустой
-//   - HTTPSender: если config.AuditRemoteURL не пустой
-//
-// Запускает фоновую горутину (worker) для обработки событий.
-// Гарантирует однократный запуск worker'а даже при множественных вызовах.
-//
 // Параметры:
-//   - cfg: конфигурация приложения (используются поля AuditFilePath и AuditRemoteURL)
-//   - logger: структурированный логгер для записи событий сервиса
+//   - cfg: конфигурация приложения (используется AuditBufferSize)
+//   - logger: структурированный логгер
+//   - senders: вариативный список отправителей (FileSender, HTTPSender и т.д.)
 //
 // Возвращает:
 //   - *AuditService: готовый к использованию сервис аудита
@@ -65,30 +59,34 @@ type AuditService struct {
 //
 //	cfg := config.Load()
 //	logger, _ := zap.NewProduction()
-//	auditSvc := service.NewAuditService(cfg, logger)
-//	defer auditSvc.Shutdown(context.Background())
 //
-//	// Использование в обработчиках:
-//	handler := func(w http.ResponseWriter, r *http.Request) {
-//	    event := audit.NewShortenEvent(userID, url)
-//	    auditSvc.SendAsync(event)
+//	var senders []sender.Sender
+//	if cfg.AuditFilePath != "" {
+//	    senders = append(senders, sender.NewFileSender(cfg.AuditFilePath, logger))
 //	}
-func NewAuditService(cfg *config.Config, logger *zap.Logger) *AuditService {
+//	if cfg.AuditRemoteURL != "" {
+//	    senders = append(senders, sender.NewHTTPSender(cfg.AuditRemoteURL, cfg.HTTPClientTimeout, logger))
+//	}
+//
+//	auditSvc := service.NewAuditService(cfg, logger, senders...)
+//	defer auditSvc.Shutdown(context.Background())
+func NewAuditService(cfg *config.Config,
+	logger *zap.Logger,
+	senders ...sender.Sender,
+) *AuditService {
 	s := &AuditService{
 		cfg:      cfg,
 		logger:   logger,
-		eventCh:  make(chan *audit.Event, 4096),
-		senders:  make([]sender.Sender, 0, 2),
+		eventCh:  make(chan *audit.Event, cfg.AuditBufferSize),
+		senders:  make([]sender.Sender, 0, len(senders)),
 		shutdown: make(chan struct{}),
 		closed:   make(chan struct{}),
 	}
 
-	if cfg.AuditFilePath != "" {
-		s.senders = append(s.senders, sender.NewFileSender(cfg.AuditFilePath, s.logger))
-	}
-
-	if cfg.AuditRemoteURL != "" {
-		s.senders = append(s.senders, sender.NewHTTPSender(cfg.AuditRemoteURL, s.logger))
+	for _, snd := range senders {
+		if snd != nil {
+			s.senders = append(s.senders, snd)
+		}
 	}
 
 	if len(s.senders) == 0 {
@@ -99,7 +97,7 @@ func NewAuditService(cfg *config.Config, logger *zap.Logger) *AuditService {
 		go s.worker()
 		s.logger.Info("audit service started",
 			zap.Int("buffer_capacity", cap(s.eventCh)),
-			zap.Int("senders_count", len(s.senders)),
+			zap.Int("senders_count", len(senders)),
 		)
 	})
 	return s
@@ -108,29 +106,14 @@ func NewAuditService(cfg *config.Config, logger *zap.Logger) *AuditService {
 // SendAsync асинхронно отправляет аудит-событие на обработку.
 //
 // Метод помещает событие в буферизированную очередь и немедленно возвращает управление.
-// Это позволяет не блокировать основной поток приложения даже при медленных sender'ах.
 //
 // Параметры:
-//   - event: аудит-событие для записи. Если nil - игнорируется с debug логом.
+//   - event: аудит-событие для записи
 //
 // Особенности:
-//   - Не блокирующий вызов (если буфер не полон)
-//   - Thread-safe - поддерживает конкурентные вызовы из нескольких горутин
+//   - Не блокирующий вызов
+//   - Thread-safe
 //   - При переполнении буфера выводится warning и событие отбрасывается
-//   - Во время shutdown новые события игнорируются
-//
-// Пример использования:
-//
-//	func SomeHandler(userID string, url string) {
-//	    event := &audit.Event{
-//	        Timestamp: time.Now(),
-//	        UserID:    userID,
-//	        Action:    "shorten",
-//	        URL:       url,
-//	    }
-//	    auditSvc.SendAsync(event) // не блокирует
-//	    // продолжение обработки запроса...
-//	}
 func (s *AuditService) SendAsync(event *audit.Event) {
 	if event == nil {
 		s.logger.Debug("nil event received")
@@ -155,37 +138,24 @@ func (s *AuditService) SendAsync(event *audit.Event) {
 // Shutdown выполняет graceful shutdown сервиса аудита.
 //
 // Процесс shutdown:
-//   1. Прекращает прием новых событий
-//   2. Дожидается обработки всех событий в буфере
-//   3. Закрывает все sender'ы (файлы, соединения)
-//   4. Гарантирует освобождение ресурсов
+//  1. Прекращает прием новых событий
+//  2. Дожидается обработки всех событий в буфере
+//  3. Закрывает все sender'ы (файлы, соединения)
+//  4. Гарантирует освобождение ресурсов
 //
 // Параметры:
-//   - ctx: контекст с таймаутом для ограничения времени shutdown
+//   - ctx: контекст с таймаутом (рекомендуется cfg.AuditShutdownTimeout)
 //
 // Возвращает:
 //   - error: ошибка если shutdown превысил таймаут контекста
 //
 // Пример использования:
-//     // Основная функция приложения
-//     func main() {
-//         auditSvc := service.NewAuditService(cfg, logger)
 //
-//         // Обработка сигналов завершения
-//         sigCh := make(chan os.Signal, 1)
-//         signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-//
-//         <-sigCh // получен сигнал завершения
-//
-//         // Graceful shutdown с таймаутом 10 секунд
-//         ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-//         defer cancel()
-//
-//         if err := auditSvc.Shutdown(ctx); err != nil {
-//             logger.Error("audit shutdown failed", zap.Error(err))
-//         }
-//     }
-
+//	ctx, cancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
+//	defer cancel()
+//	if err := auditSvc.Shutdown(ctx); err != nil {
+//	    logger.Error("audit shutdown failed", zap.Error(err))
+//	}
 func (s *AuditService) Shutdown(ctx context.Context) error {
 	s.logger.Info("audit service shutdown")
 
@@ -237,7 +207,8 @@ func (s *AuditService) worker() {
 			}
 			// рассылаем сообщение всем sender
 			for _, snd := range s.senders {
-				if err := snd.Send(event); err != nil {
+				err := snd.Send(event)
+				if err != nil {
 					s.logger.Error("failed to send event",
 						zap.String("sender", snd.Name()),
 						zap.String("action", event.Action),
@@ -251,20 +222,17 @@ func (s *AuditService) worker() {
 			s.logger.Info("audit worker shutdown")
 			for event := range s.eventCh {
 				for _, snd := range s.senders {
-					if err := snd.Send(event); err != nil {
-						s.logger.Error("audit send failed during shutdown",
-							zap.String("sender", snd.Name()),
-							zap.Error(err),
-						)
-					}
+					snd.Send(event)
+
 				}
 			}
 			s.logger.Info("queue drained, worker shutdown completed")
 
 			// Закрытие отправителей (файлов и соединений)
 			for _, snd := range s.senders {
-				if closer, ok := snd.(interface{ Close() error }); ok {
-					if err := closer.Close(); err != nil {
+				if closer, ok := snd.(sender.CloserSender); ok {
+					err := closer.Close()
+					if err != nil {
 						s.logger.Error("sender closed failed during shutdown",
 							zap.String("sender", snd.Name()),
 							zap.Error(err),

@@ -3,18 +3,17 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
+	_ "github.com/joho/godotenv/autoload"
+	"go.uber.org/zap"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
-
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
-	_ "github.com/joho/godotenv/autoload"
-	"go.uber.org/zap"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
@@ -47,26 +46,40 @@ func main() {
 	var repo repository.URLRepository
 
 	if cfg.DatabaseDSN != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.InitTimeout)
 		defer cancel()
 
-		pool, err := db.New(ctx, cfg.DatabaseDSN)
+		pool, err := db.New(ctx, cfg.DatabaseDSN, cfg)
 		if err != nil {
 			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
-			repo = repository.NewMemoryRepository()
+			repo = repository.NewMemoryRepository(cfg.BaseURL)
 		} else {
 			logger.Info("using postgres storage")
-			repo = repository.NewPostgresRepository(pool.Pool, logger)
+			repo = repository.NewPostgresRepository(pool.Pool, logger, cfg.BaseURL)
 		}
 	} else if cfg.FileStoragePath != "" {
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
-		repo = repository.NewFileRepository(cfg.FileStoragePath)
+		repo = repository.NewFileRepository(cfg.FileStoragePath, cfg.BaseURL)
 	} else {
 		logger.Info("using in-memory storage")
-		repo = repository.NewMemoryRepository()
+		repo = repository.NewMemoryRepository(cfg.BaseURL)
 	}
 
-	auditSvc := service.New(cfg, logger)
+	// Аудит
+	var auditSenders []sender.Sender
+
+	if cfg.AuditFilePath != "" {
+		auditSenders = append(auditSenders,
+			sender.NewFileSender(cfg.AuditFilePath, logger))
+
+	}
+
+	if cfg.AuditRemoteURL != "" {
+		auditSenders = append(auditSenders,
+			sender.NewHTTPSender(cfg.AuditRemoteURL, cfg.HTTPClientTimeout, logger))
+	}
+
+	auditSvc := service.NewAuditService(cfg, logger, auditSenders...)
 
 	// Хендлер
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
@@ -104,6 +117,7 @@ func main() {
 	})).ServeHTTP)
 
 	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP)
+
 	// Сервер
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
@@ -117,6 +131,7 @@ func main() {
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 
+	// Профилирование
 	go func() {
 		pprofAddr := "localhost:6060"
 		logger.Info("pprof server started", zap.String("addr", "http://"+pprofAddr+"/debug/pprof"))
@@ -126,13 +141,13 @@ func main() {
 		}
 	}()
 
-	// Gracefull shutdown
+	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
 	logger.Info("shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
@@ -144,8 +159,9 @@ func main() {
 	}
 
 	// Даем дописать и успешно shutdown
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
 	defer cancel()
+
 	if err := auditSvc.Shutdown(shutdownCtx); err != nil {
 		logger.Error("audit shutdown failed", zap.Error(err))
 	} else {

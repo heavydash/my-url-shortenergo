@@ -5,38 +5,30 @@ package sender
 
 import "github.com/heavydash/my-url-shortenergo/internal/audit"
 
-// Sender определяет интерфейс для отправки аудит-событий в различные системы назначения.
+// Sender — базовый контракт отправителя аудит-событий. определяет интерфейс для отправки аудит-событий в различные системы назначения.
 //
-// Интерфейс реализует паттерн "стратегия", позволяя легко добавлять новые
-// способы доставки событий без изменения клиентского кода. Все реализации
-// должны гарантировать потокобезопасность при использовании из нескольких горутин.
+// Реализует стратегию доставки событий в разные системы.
+// Все реализации должны быть потокобезопасными.
 //
-// Реализации интерфейса:
-//   - FileSender: отправка событий в локальный файл
-//   - HTTPSender: отправка событий по HTTP/HTTPS
-//   - ConsoleSender: отправка событий в stdout/stderr (для отладки)
-//   - DatabaseSender: сохранение событий в базу данных
-//   - KafkaSender/RabbitMQSender: отправка в message queue
-//   - MultiSender: отправка в несколько систем одновременно
+// Основные реализации:
+//   - FileSender: запись в локальный файл
+//   - HTTPSender: отправка по HTTP/HTTPS
+//   - ConsoleSender: вывод в stdout/stderr (отладка)
 //
-// Пример использования:
-//     // Создаем отправители
-//     fileSender := sender.NewFileSender("/var/log/audit.log", logger)
-//     httpSender := sender.NewHTTPSender("https://audit.example.com/events", logger)
+// Пример использования через интерфейс:
 //
-//     // Используем через интерфейс
-//     var senders []sender.Sender
-//     senders = append(senders, fileSender)
-//     senders = append(senders, httpSender)
+//			fileSender := sender.NewFileSender(cfg.AuditFilePath, logger)
+//		    httpSender := sender.NewHTTPSender(cfg.AuditRemoteURL, cfg.HTTPClientTimeout, logger)
 //
-//     // Отправляем событие во все системы
-//     for _, s := range senders {
-//         if err := s.Send(event); err != nil {
-//             log.Printf("Failed to send via %s: %v", s.Name(), err)
-//         }
-//     }
+//			var senders []sender.Sender
+//			senders = append(senders, fileSender)
+//			senders = append(senders, httpSender)
 //
-
+//			for _, s := range senders {
+//			   if err := s.Send(event); err != nil {
+//	            log.Printf("Failed to send via %s: %v", s.Name(), err)
+//	        }
+//	    }
 type Sender interface {
 	// Name возвращает уникальное имя отправителя.
 	//
@@ -45,46 +37,36 @@ type Sender interface {
 	//   - Мониторинга и метрик (например, prometheus labels)
 	//   - Конфигурации и динамического управления
 	//
-	// Имя должно быть:
-	//   - Уникальным в пределах приложения
-	//   - Описательным (понятно куда отправляются события)
-	//   - Неизменным в течение жизненного цикла отправителя
-	//
 	// Примеры имен:
 	//   - "file:/var/log/audit.log"
 	//   - "http:https://audit.internal/api/events"
-	//   - "kafka:audit-events-topic"
-	//   - "console:stdout"
 	//
 	// Возвращает:
 	//   - string: уникальное имя отправителя
 	Name() string
+
 	// Send отправляет аудит-событие в целевую систему.
-	//
-	// Метод должен:
-	//   - Сериализовать событие в подходящий формат (JSON, Protobuf и т.д.)
-	//   - Отправить данные в целевую систему
-	//   - Проверить успешность отправки
-	//   - Вернуть ошибку при неудаче
 	//
 	// Параметры:
 	//   - event: указатель на аудит-событие для отправки.
-	//            Событие не должно изменяться отправителем.
+	//
 	//
 	// Возвращает:
 	//   - error: ошибка отправки или nil при успехе.
-	//            Типичные ошибки: сетевые проблемы, недоступность
-	//            целевой системы, ошибки сериализации.
 	//
-	// Особенности реализации:
-	//   - Для блокирующих операций (сеть, диск) используйте контексты и таймауты
-	//   - Рассмотрите буферизацию и батчинг для повышения производительности
-	//   - Для критичных событий используйте подтверждение доставки (ack)
-	//   - Логируйте ошибки, но не дублируйте логирование успешных операций
-	//
-	// Примеры ошибок:
-	//   - "failed to open audit file: permission denied"
-	//   - "HTTP request failed: dial tcp timeout"
-	//   - "JSON marshal failed: unsupported type"
 	Send(event *audit.Event) error
+}
+
+// CloserSender — расширенный контракт для отправителей, которые требуют закрытия ресурсов.
+// Встраивает Sender и добавляет Close().
+//
+// Примеры:
+//   - FileSender: закрывает файл
+//   - HTTPSender: обычно noop (return nil)
+//   - DatabaseSender: закрывает соединение
+//
+// Используется в graceful shutdown для корректного освобождения ресурсов.
+type CloserSender interface {
+	Sender
+	Close() error
 }
