@@ -11,7 +11,7 @@ import (
 // SaveURL
 func BenchmarkRepo_Save(b *testing.B) {
 	b.Log("STARTING MEMORY REPO SAVE")
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository("http://localhost:8080")
 	original := model.URLModel{
 		OriginalURL: "http://example.com",
 	}
@@ -27,7 +27,7 @@ func BenchmarkRepo_Save(b *testing.B) {
 
 // Found
 func BenchmarkRepo_GetURLFound(b *testing.B) {
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository("http://localhost:8080")
 
 	savedKeys := make([]string, 1000)
 
@@ -50,7 +50,7 @@ func BenchmarkRepo_GetURLFound(b *testing.B) {
 
 // NotFound
 func BenchmarkRepo_GetURLNotFound(b *testing.B) {
-	repo := NewMemoryRepository()
+	repo := NewMemoryRepository("http://localhost:8080")
 
 	// Предзаполняем
 	for i := 0; i < 1000; i++ {

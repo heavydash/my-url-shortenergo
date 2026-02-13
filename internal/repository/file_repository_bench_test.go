@@ -16,7 +16,7 @@ func newTempFilerepo(b *testing.B) *FileRepository {
 	tmpDir := b.TempDir() // создает временную директорию для теста
 	tmpFile := filepath.Join(tmpDir, "urls.json")
 
-	repo := NewFileRepository(tmpFile)
+	repo := NewFileRepository(tmpFile, "http://localhost:8080")
 
 	// Удаляем файл после завершения бенчмарка
 	b.Cleanup(func() {

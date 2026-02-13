@@ -33,6 +33,12 @@ func newTestHandler(
 ) *Handler {
 	t.Helper()
 
+	if cfg == nil {
+		cfg = &config.Config{
+			BaseURL: "http://localhost:8080",
+		}
+	}
+
 	auditNoop := &service.Noop{}
 
 	return NewHandler(
@@ -44,7 +50,7 @@ func newTestHandler(
 }
 
 func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	if err := repo.Clear(); err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
@@ -380,7 +386,7 @@ func TestGetUserURLs_Empty(t *testing.T) {
 // Бенчмарки
 // Создание новой короткой ссылки
 func BenchmarkShorten_NewURL(b *testing.B) {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	logger := zap.NewNop()
 	auditNoop := service.Noop{}
@@ -403,7 +409,7 @@ func BenchmarkShorten_NewURL(b *testing.B) {
 
 // Повторное сокращение уже существующей ссылки
 func BenchmarkShorten_ExistingURL(b *testing.B) {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -426,7 +432,7 @@ func BenchmarkShorten_ExistingURL(b *testing.B) {
 
 // Редирект
 func BenchmarkResolve_Found(b *testing.B) {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -446,7 +452,7 @@ func BenchmarkResolve_Found(b *testing.B) {
 
 // Несуществующий короткий код
 func BenchmarkResolve_NotFound(b *testing.B) {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -467,7 +473,7 @@ func BenchmarkResolve_NotFound(b *testing.B) {
 // Batch
 func BenchmarkBatchShorten(b *testing.B) {
 	//start
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}

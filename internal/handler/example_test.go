@@ -22,7 +22,7 @@ func ExampleHandler_ShortenPlainHandler() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -66,7 +66,7 @@ func ExampleHandler_RedirectURL() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -100,7 +100,7 @@ func ExampleHandler_PingHandler() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация (может быть nil для тестов)
 	var cfg *config.Config // nil config допустимо
@@ -130,7 +130,7 @@ func ExampleHandler_HomeHandler() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -164,7 +164,7 @@ func ExampleHandler_HomeHandler_wrongMethod() {
 	logger, _ := zap.NewDevelopment()
 	defer logger.Sync()
 
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{}
 	auditSvc := service.New(cfg, logger)
 	defer auditSvc.Shutdown(context.Background())

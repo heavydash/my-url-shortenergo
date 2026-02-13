@@ -13,7 +13,7 @@ import (
 
 // Пример работы с MemoryRepository.
 func ExampleMemoryRepository() {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	defer repo.Clear()
 
 	userID := uuid.New()
@@ -60,7 +60,7 @@ func ExampleFileRepository() {
 	tmpfile.Close()
 	defer os.Remove(tmpfile.Name())
 
-	repo := repository.NewFileRepository(tmpfile.Name())
+	repo := repository.NewFileRepository(tmpfile.Name(), "http://localhost:8080")
 	// В реальном коде: defer repo.file.Close()
 
 	userID := uuid.New()
@@ -88,7 +88,7 @@ func ExampleFileRepository() {
 
 // Пример получения URL пользователя.
 func ExampleMemoryRepository_GetURLsByUser() {
-	repo := repository.NewMemoryRepository()
+	repo := repository.NewMemoryRepository("http://localhost:8080")
 	defer repo.Clear()
 
 	userID := uuid.New()
