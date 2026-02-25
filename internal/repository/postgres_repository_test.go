@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"os"
 	"strings"
 	"testing"
@@ -24,15 +25,24 @@ func newTestPostgresRepo(t *testing.T) *PostgresRepository {
 		t.Skip("DATABASE_DSN environment variable not set")
 	}
 
+	// Создаём минимальный тестовый конфиг`
+	testCfg := &config.Config{
+		PingTimeout:         5 * time.Second, // или любое разумное значение
+		DBMaxConns:          5,
+		DBMinConns:          1,
+		DBMaxConnLifetime:   5 * time.Minute,
+		DBHealthCheckPeriod: 1 * time.Minute,
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := db.New(ctx, dsn)
+	pool, err := db.New(ctx, dsn, testCfg)
 	require.NoError(t, err, "failed to connect to postgres")
 
 	logger := zap.NewNop()
 
-	repo := NewPostgresRepository(pool.Pool, logger)
+	repo := NewPostgresRepository(pool.Pool, logger, "http://localhost:8080")
 
 	// Очистка таблиц перед каждым тестом
 	_, err = pool.Exec(ctx, "TRUNCATE TABLE urls RESTART IDENTITY CASCADE")

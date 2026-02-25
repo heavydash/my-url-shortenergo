@@ -16,10 +16,54 @@ import (
 	"go.uber.org/zap"
 )
 
+// ShortenJSONHandler обрабатывает POST запросы с JSON телом для сокращения URL.
+//
+// Пример запроса:
+//
+//	POST /api/shorten
+//	Content-Type: application/json
+//	Body: {"url": "https://example.com"}
+//
+// Пример ответа:
+//
+//	201 Created
+//	Content-Type: application/json
+//	Body: {"result": "http://localhost:8080/abc123"}
+//
+// Если URL уже существует, возвращает 409 Conflict с существующим сокращенным URL.
+//
+// Коды ответа:
+//
+//	201 Created - URL успешно сокращен
+//	400 Bad Request - невалидный JSON или URL
+//	409 Conflict - URL уже существует
+//	500 Internal Server Error - ошибка сервера
 func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 	h.ShortenHandler(w, r, true)
 }
 
+// GetUserURLs возвращает все сокращенные URL, созданные текущим пользователем.
+//
+// Пример запроса:
+//
+//	GET /api/user/urls
+//	Cookie: user_id=<signed-user-uuid>
+//
+// Пример ответа:
+//
+//	200 OK
+//	Content-Type: application/json
+//	Body: [{"short_url":"http://localhost:8080/abc123","original_url":"https://example.com"}]
+//
+// Если у пользователя нет URL, возвращает 204 No Content.
+// Требует аутентификации через middleware.Auth.
+//
+// Коды ответа:
+//
+//	200 OK - успешно возвращены URL пользователя
+//	204 No Content - у пользователя нет сохраненных URL
+//	401 Unauthorized - отсутствует или невалидный user_id в cookies
+//	500 Internal Server Error - ошибка при получении данных
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	// Достаём из контекста
 	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
@@ -46,6 +90,36 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	h.sendResponse(w, true, urls, http.StatusOK)
 }
 
+// BatchShortenHandler обрабатывает пакетное создание нескольких коротких URL за один запрос.
+//
+// Пример запроса:
+//
+//	POST /api/shorten/batch
+//	Content-Type: application/json
+//	Body: [
+//	  {"correlation_id": "1", "original_url": "https://example.com/1"},
+//	  {"correlation_id": "2", "original_url": "https://example.com/2"}
+//	]
+//
+// Пример ответа:
+//
+//	201 Created
+//	Content-Type: application/json
+//	Body: [
+//	  {"correlation_id": "1", "short_url": "http://localhost:8080/abc123"},
+//	  {"correlation_id": "2", "short_url": "http://localhost:8080/def456"}
+//	]
+//
+// Валидация:
+//   - correlation_id должен быть уникальным в пределах запроса
+//   - URL должен иметь схему http:// или https://
+//   - Batch не может быть пустым
+//
+// Коды ответа:
+//
+//	201 Created - пакет успешно обработан
+//	400 Bad Request - невалидный JSON, дубликаты correlation_id, пустой batch
+//	500 Internal Server Error - ошибка при сохранении
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -132,6 +206,32 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteUrls помечает указанные короткие URL для асинхронного удаления.
+// Удаление выполняется фоном через URLDeleter, метод сразу возвращает 202 Accepted.
+//
+// Пример запроса:
+//
+//	DELETE /api/user/urls
+//	Content-Type: application/json
+//	Cookie: user_id=<signed-user-uuid>
+//	Body: ["abc123", "def456"]
+//
+// Пример ответа:
+//
+//	202 Accepted
+//
+// Особенности:
+//   - Удаление только своих URL (проверяется по user_id)
+//   - Soft delete (URL помечаются как удаленные, но остаются в БД)
+//   - Асинхронная обработка, запрос сразу возвращает 202
+//   - Автоматическая дедупликация ID в запросе
+//   - Требует аутентификации через middleware.Auth
+//
+// Коды ответа:
+//
+//	202 Accepted - запрос на удаление принят в обработку
+//	400 Bad Request - невалидный JSON
+//	401 Unauthorized - отсутствует или невалидный user_id в cookies
 func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 
 	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
@@ -167,6 +267,6 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		UserID:   userID,
 		ShortIDs: deduped,
 	})
-	
+
 	w.WriteHeader(http.StatusAccepted)
 }

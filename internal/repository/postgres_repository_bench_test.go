@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"os"
 	"testing"
 	"time"
@@ -22,17 +23,25 @@ func newBenchmarkRepo(b *testing.B) *PostgresRepository {
 	if dsn == "" {
 		b.Skip("DATABASE_URL is not set")
 	}
+	// Создаём минимальный тестовый конфиг`
+	testCfg := &config.Config{
+		PingTimeout:         5 * time.Second, // или любое разумное значение
+		DBMaxConns:          5,
+		DBMinConns:          1,
+		DBMaxConnLifetime:   5 * time.Minute,
+		DBHealthCheckPeriod: 1 * time.Minute,
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	pool, err := db.New(ctx, dsn)
+	pool, err := db.New(ctx, dsn, testCfg)
 	if err != nil {
 		b.Fatalf("failed to connect postgres: %v", err)
 	}
 
 	logger := zap.NewNop()
-	repo := &PostgresRepository{pool.Pool, logger}
+	repo := &PostgresRepository{pool.Pool, logger, "http://localhost:8080"}
 
 	// Очистка таблиц перед бенчмарком
 	_, err = pool.Exec(ctx, "TRUNCATE TABLE urls RESTART IDENTITY CASCADE")
