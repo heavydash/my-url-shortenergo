@@ -6,8 +6,10 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	_ "github.com/joho/godotenv/autoload"
+	"go.uber.org/zap"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,7 +21,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"github.com/heavydash/my-url-shortenergo/migrations"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -102,7 +103,6 @@ func main() {
 	})).ServeHTTP)
 
 	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP)
-
 	// Сервер
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
@@ -115,6 +115,15 @@ func main() {
 	}()
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
+
+	go func() {
+		pprofAddr := "localhost:6060"
+		logger.Info("pprof server started", zap.String("addr", "http://"+pprofAddr+"/debug/pprof"))
+
+		if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+			logger.Error("failed to start pprof server", zap.Error(err))
+		}
+	}()
 
 	// Gracefull shutdown
 	stop := make(chan os.Signal, 1)

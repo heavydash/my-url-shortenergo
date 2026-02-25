@@ -2,17 +2,42 @@ package middleware
 
 import (
 	"compress/gzip"
+	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-type gzipWriter struct {
+type gzipResponseWriter struct {
+	io.Writer
 	http.ResponseWriter
-	writer *gzip.Writer
 }
 
-func (w *gzipWriter) Write(b []byte) (int, error) {
-	return w.writer.Write(b)
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func (w *gzipResponseWriter) Flush() {
+	// Flush gzip буффера
+	if f, ok := w.Writer.(flusher); ok {
+		f.Flush()
+	}
+	// Flush оригинального соединения
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+type flusher interface {
+	Flush() error
+}
+
+// Пул для gzip.Writer
+var gzipWriterPool = sync.Pool{
+	New: func() interface{} {
+		// Шаблонный Writer с nil
+		return gzip.NewWriter(nil)
+	},
 }
 
 func GzipMiddleware(next http.Handler) http.Handler {
@@ -28,13 +53,34 @@ func GzipMiddleware(next http.Handler) http.Handler {
 		}
 
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			gz := gzip.NewWriter(w)
-			defer gz.Close()
-			next.ServeHTTP(&gzipWriter{ResponseWriter: w, writer: gz}, r)
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// Устанавливаем заголовки
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+
+		// Берем Writer из пула
+		gz := gzipWriterPool.Get().(*gzip.Writer)
+
+		// Очищение состояния предыдущего использования
+		// Не аллоцируя новые структуры внутри
+		gz.Reset(w)
+
+		// Оборачиваем в структуру
+		gw := &gzipResponseWriter{
+			Writer:         gz,
+			ResponseWriter: w,
+		}
+
+		// Передаем управление следующему хендлеру
+		next.ServeHTTP(gw, r)
+
+		// Закрываем и возвращаем в пул
+		gz.Close()
+
+		// Возвращаем объект обратно в пул
+		gzipWriterPool.Put(gz)
 	})
 }
