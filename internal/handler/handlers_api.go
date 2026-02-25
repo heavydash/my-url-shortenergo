@@ -167,6 +167,6 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		UserID:   userID,
 		ShortIDs: deduped,
 	})
-
+	
 	w.WriteHeader(http.StatusAccepted)
 }
