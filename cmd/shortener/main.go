@@ -15,11 +15,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
-	_ "github.com/joho/godotenv/autoload"
-	"go.uber.org/zap"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
@@ -122,6 +117,7 @@ func main() {
 	})).ServeHTTP)
 
 	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP)
+
 	// Сервер
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
