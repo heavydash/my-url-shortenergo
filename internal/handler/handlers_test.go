@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -23,6 +24,24 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func newTestHandler(
+	t *testing.T,
+	repo repository.URLRepository,
+	cfg *config.Config,
+	logger *zap.Logger,
+) *Handler {
+	t.Helper()
+
+	auditNoop := &service.Noop{}
+
+	return NewHandler(
+		repo,
+		cfg,
+		logger,
+		auditNoop,
+	)
+}
+
 func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
 	repo := repository.NewMemoryRepository()
 	if err := repo.Clear(); err != nil {
@@ -33,7 +52,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	logger, _ := zap.NewProduction()
 	t.Cleanup(func() { _ = logger.Sync() })
 
-	h := NewHandler(repo, cfg, logger)
+	h := newTestHandler(t, repo, cfg, logger)
 
 	router := chi.NewRouter()
 
@@ -170,7 +189,8 @@ func TestRedirectURLSuccess(t *testing.T) {
 		Return(model.URLModel{OriginalURL: "http:/ya.ru"}, nil)
 
 	// Запускаем хендлер с мок репозиторием
-	h := NewHandler(mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, zap.NewNop())
+	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"},
+		zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/goodid", nil)
 	w := httptest.NewRecorder()
@@ -193,7 +213,7 @@ func TestRedirectURLNotFound(t *testing.T) {
 		Return(model.URLModel{}, errors.New("not found"))
 
 	// Запускаем хендлер с мок репозиторием
-	h := NewHandler(mockRepo, nil, zap.NewNop())
+	h := newTestHandler(t, mockRepo, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/goodid", nil)
 	w := httptest.NewRecorder()
@@ -211,7 +231,7 @@ func TestPingHandlerOK(t *testing.T) {
 	repo.EXPECT().Ping(gomock.Any()).Return(nil) // Что должен получить вызов и что ответить
 
 	// Запускаем хендлер с мок репозиторием
-	h := NewHandler(repo, nil, zap.NewNop())
+	h := newTestHandler(t, repo, nil, zap.NewNop())
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -248,7 +268,7 @@ func TestBatchShortenHandler_OK(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	h := NewHandler(mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, nil)
 
 	body := `[
 		{"correlation_id": "1", "original_url": "https://ya.ru"},
@@ -273,7 +293,7 @@ func TestBatchShortenHandler_OK(t *testing.T) {
 }
 
 func TestBatchShortenHandler_EmptyBatch(t *testing.T) {
-	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+	h := newTestHandler(t, nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewReader([]byte(`[]`)))
 	req.Header.Set("Content-Type", "application/json")
@@ -286,7 +306,7 @@ func TestBatchShortenHandler_EmptyBatch(t *testing.T) {
 }
 
 func TestBatchShortenHandler_DuplicateCorrelationID(t *testing.T) {
-	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+	h := newTestHandler(t, nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
 
 	body := `[
 		{"correlation_id": "dup", "original_url": "https://ya.ru"},
@@ -304,7 +324,7 @@ func TestBatchShortenHandler_DuplicateCorrelationID(t *testing.T) {
 }
 
 func TestBatchShortenHandler_InvalidURL(t *testing.T) {
-	h := NewHandler(nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
+	h := newTestHandler(t, nil, &config.Config{BaseURL: "http://localhost:8080"}, nil)
 
 	body := `[
 		{"correlation_id": "1", "original_url": "not-a-url"}
@@ -329,7 +349,7 @@ func TestGetUserURLs_Empty(t *testing.T) {
 		GetURLsByUser(gomock.Any(), gomock.Any()).
 		Return([]model.URLModel{}, nil)
 
-	h := NewHandler(mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, zap.NewNop())
+	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, zap.NewNop())
 
 	router, rec := SetupTestRouter(t, h)
 
