@@ -29,18 +29,18 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/deleter"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
-	"github.com/heavydash/my-url-shortenergo/internal/util"
-
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"go.uber.org/zap"
-
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	"github.com/heavydash/my-url-shortenergo/internal/util"
+	_ "github.com/joho/godotenv/autoload"
+	"go.uber.org/zap"
 )
 
 // Handler содержит зависимости для обработки HTTP запросов сервиса сокращения URL.
