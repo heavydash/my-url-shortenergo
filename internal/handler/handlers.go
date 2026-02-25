@@ -26,17 +26,10 @@ import (
 
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
-	"github.com/heavydash/my-url-shortenergo/internal/util"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
