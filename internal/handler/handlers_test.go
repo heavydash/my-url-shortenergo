@@ -384,8 +384,7 @@ func TestGetUserURLs_Empty(t *testing.T) {
 func BenchmarkShorten_NewURL(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
-	var logger *zap.Logger
-	logger = zap.NewNop()
+	logger := zap.NewNop()
 	auditNoop := service.Noop{}
 
 	h := NewHandler(repo, cfg, logger, auditNoop)
