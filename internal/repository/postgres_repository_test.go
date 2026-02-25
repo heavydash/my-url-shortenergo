@@ -3,16 +3,17 @@ package repository
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"os"
-	"strings"
-	"testing"
-	"time"
 )
 
 func newTestPostgresRepo(t *testing.T) *PostgresRepository {

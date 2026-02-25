@@ -2,10 +2,11 @@ package middleware
 
 import (
 	"context"
+	"net/http"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 // Ключ для контекста,приватный тип, чтобы никто не перезаписал
