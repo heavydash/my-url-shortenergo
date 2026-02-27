@@ -11,14 +11,16 @@ import (
 
 // Пример работы GzipMiddleware со сжатием ответа.
 func ExampleGzipMiddleware() {
+	logger, _ := zap.NewDevelopment()
+
 	// Создаем обработчик, возвращающий текст для сжатия
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("This response will be compressed by gzip middleware"))
+		_, _ = w.Write([]byte("This response will be compressed by gzip middleware"))
 	})
 
 	// Оборачиваем в gzip middleware
-	gzippedHandler := GzipMiddleware(handler)
+	gzippedHandler := GzipMiddleware(logger)(handler)
 
 	// Запрос с поддержкой gzip
 	req := httptest.NewRequest("GET", "/", nil)
@@ -42,7 +44,7 @@ func ExampleLogging() {
 
 	// Создаем простой обработчик
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK"))
 	})
 
 	// Оборачиваем в logging middleware
@@ -67,9 +69,9 @@ func Example_middlewareChain() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := r.Context().Value(UserIDKey)
 		if userID != nil {
-			fmt.Fprint(w, "Authenticated request")
+			_, _ = fmt.Fprint(w, "Authenticated request")
 		} else {
-			fmt.Fprint(w, "Anonymous request")
+			_, _ = fmt.Fprint(w, "Anonymous request")
 		}
 	})
 
@@ -78,8 +80,10 @@ func Example_middlewareChain() {
 	// 2. Gzip (сжимает ответ)
 	// 3. Auth (добавляет userID в контекст)
 	chain := Logging(logger)(
-		GzipMiddleware(
-			Auth(logger)(handler),
+		GzipMiddleware(logger)(
+			Auth(logger)(
+				handler,
+			),
 		),
 	)
 

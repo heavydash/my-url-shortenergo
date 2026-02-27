@@ -1,18 +1,49 @@
-package main
+package exitcheck
 
 import (
 	"go/ast"
 	"golang.org/x/tools/go/analysis"
 )
 
-// Analyzer, который мы добавляем в multichecker
+// Analyzer запрещает прямой вызов os.Exit в функции main пакета main.
+//
+// Причина: os.Exit немедленно завершает процесс, игнорируя все отложенные вызовы (defer),
+// что может привести к утечкам ресурсов, незакрытым соединениям, несохранённым метрикам и т.д.
+//
+// Рекомендация: возвращать ошибку из main или использовать log.Fatal / graceful shutdown.
+//
+// Примеры:
+//
+//	// Правильно:
+//	func main() {
+//	    if err := run(); err != nil {
+//	        log.Fatal(err)
+//	    }
+//	}
+//
+//	// Неправильно:
+//	func main() {
+//	    if err := run(); err != nil {
+//	        os.Exit(1) // анализатор выдаст ошибку
+//	    }
+//	}
+//
+// Где используется: только в пакете main, в функции main.
 var Analyzer = &analysis.Analyzer{
 	Name: "exitcheck",
 	Doc:  "Запрещает прямой вызов os.Exit в функции main пакета main.\n",
 	Run:  runExitCheck,
 }
 
-// run — основная функция анализатора
+// runExitCheck — основная функция анализатора
+//
+// Алгоритм работы:
+// 1. Проверяет, что анализируемый пакет называется "main"
+// 2. Обходит AST в поисках функции main
+// 3. Внутри тела main ищет вызовы os.Exit()
+// 4. При нахождении сообщает об ошибке с указанием позиции в коде
+//
+// Возвращает: (nil, nil) — стандартный интерфейс анализатора.
 func runExitCheck(pass *analysis.Pass) (interface{}, error) {
 	// Проходим по всем файлам текущего пакета
 	for _, file := range pass.Files {
@@ -57,7 +88,7 @@ func runExitCheck(pass *analysis.Pass) (interface{}, error) {
 					return true
 				}
 
-				// Нашли запрещённый вызов!
+				// Нашли запрещённый вызов
 				pass.Reportf(call.Pos(), "прямой вызов os.Exit() в main запрещён — "+
 					"используйте return или log.Fatal / graceful shutdown")
 

@@ -12,9 +12,19 @@ func TestNewConfig(t *testing.T) {
 	///Переменные окружения заданы
 	t.Run("env variables set", func(t *testing.T) {
 		_ = os.Setenv("SERVER_ADDRESS", ":9090")
-		os.Setenv("BASE_URL", "http://example.com")
-		defer os.Unsetenv("SERVER_ADDRESS")
-		defer os.Unsetenv("BASE_URL")
+		if err := os.Setenv("BASE_URL", "http://example.com"); err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := os.Unsetenv("SERVER_ADDRESS"); err != nil {
+				panic(err)
+			}
+		}()
+		defer func() {
+			if err := os.Unsetenv("BASE_URL"); err != nil {
+				panic(err)
+			}
+		}()
 
 		originalArgs := os.Args
 		os.Args = []string{"test"}

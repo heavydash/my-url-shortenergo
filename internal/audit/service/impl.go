@@ -222,8 +222,9 @@ func (s *AuditService) worker() {
 			s.logger.Info("audit worker shutdown")
 			for event := range s.eventCh {
 				for _, snd := range s.senders {
-					snd.Send(event)
-
+					if err := snd.Send(event); err != nil {
+						s.logger.Error("failed to send event")
+					}
 				}
 			}
 			s.logger.Info("queue drained, worker shutdown completed")

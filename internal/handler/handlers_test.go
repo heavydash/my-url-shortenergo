@@ -64,7 +64,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	router := chi.NewRouter()
 
 	router.Use(middleware.Logging(logger))
-	router.Use(middleware.GzipMiddleware)
+	router.Use(middleware.GzipMiddleware(logger))
 
 	router.Get("/{id}", h.RedirectURL)
 
@@ -95,7 +95,7 @@ func SetupTestRouter(t *testing.T, h *Handler) (*chi.Mux, httptest.ResponseRecor
 	logger := zap.NewNop()
 
 	router.Use(middleware.Logging(logger))
-	router.Use(middleware.GzipMiddleware)
+	router.Use(middleware.GzipMiddleware(logger))
 
 	// Авторизованные роуты
 	router.Group(func(r chi.Router) {
@@ -505,7 +505,11 @@ func getResponseBody(t *testing.T, w *httptest.ResponseRecorder) string {
 	if w.Header().Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(bytes.NewReader(bodyBytes))
 		require.NoError(t, err, "failed to create gzip reader")
-		defer gr.Close()
+		defer func() {
+			if err = gr.Close(); err != nil {
+				panic(err)
+			}
+		}()
 
 		decompressed, err := io.ReadAll(gr)
 		require.NoError(t, err, "failed to decompress gzip reader")

@@ -222,7 +222,12 @@ func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error)
 		h.logger.Error("Failed to read body", zap.Error(err))
 		return "", err
 	}
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			h.logger.Error("Failed to close body", zap.Error(err))
+		}
+	}()
+
 	if isJSON {
 		req := model.Request{}
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -276,7 +281,9 @@ func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, stat
 		resp := map[string]string{"error": msg}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			h.logger.Error("Failed to encode response", zap.Error(err))
+		}
 	} else {
 		http.Error(w, msg, status)
 	}

@@ -14,7 +14,11 @@ import (
 // Пример работы с MemoryRepository.
 func ExampleMemoryRepository() {
 	repo := repository.NewMemoryRepository("http://localhost:8080")
-	defer repo.Clear()
+	defer func() {
+		if err := repo.Clear(); err != nil {
+			panic(err)
+		}
+	}()
 
 	userID := uuid.New()
 
@@ -57,8 +61,12 @@ func ExampleFileRepository() {
 		fmt.Printf("Failed to create temp file: %v\n", err)
 		return
 	}
-	tmpfile.Close()
-	defer os.Remove(tmpfile.Name())
+	_ = tmpfile.Close()
+	defer func() {
+		if err = os.Remove(tmpfile.Name()); err != nil {
+			fmt.Printf("Failed to remove temp file: %v\n", err)
+		}
+	}()
 
 	repo := repository.NewFileRepository(tmpfile.Name(), "http://localhost:8080")
 	// В реальном коде: defer repo.file.Close()
@@ -89,7 +97,11 @@ func ExampleFileRepository() {
 // Пример получения URL пользователя.
 func ExampleMemoryRepository_GetURLsByUser() {
 	repo := repository.NewMemoryRepository("http://localhost:8080")
-	defer repo.Clear()
+	defer func() {
+		if err := repo.Clear(); err != nil {
+			panic(err)
+		}
+	}()
 
 	userID := uuid.New()
 
@@ -100,7 +112,7 @@ func ExampleMemoryRepository_GetURLsByUser() {
 	}
 
 	for _, url := range urls {
-		repo.SaveURL(url)
+		_, _ = repo.SaveURL(url)
 	}
 
 	// Получаем URL пользователя
