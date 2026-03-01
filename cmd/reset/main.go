@@ -8,65 +8,81 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func main() {
-	root := flag.String("dir", ".", "The root directory of the project")
-	verbose := flag.Bool("v", false, "Verbose output")
+	dir := flag.String("dir", ".", "dir for scanning")
+	verbose := flag.Bool("v", false, "verbose output")
 	flag.Parse()
 
-	fmt.Printf("finder of structure with // generate:reset in %s\n\n", *root)
+	fmt.Printf(" Searching of structs с // generate:reset в %s\n\n", *dir)
 
-	var walkErr error
-	walkErr = filepath.WalkDir(*root, func(path string, d os.DirEntry, err error) error {
-		if walkErr != nil {
-			return walkErr
+	fset := token.NewFileSet()
+
+	pkgTargets := make(map[string][]resetgen.ResetTarget)
+
+	err := filepath.WalkDir(*dir, func(path string, d os.DirEntry, err error) error {
+		// Если ошибка доступа — печатаем, но продолжаем обход
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to access %s: %v\n", path, err)
+			return nil // Если return err, весь обход стопнется
 		}
-		// Обрабатываем только директории
+
+		// Обработка директории
 		if !d.IsDir() {
 			return nil
 		}
 
+		// Пропускаем служебные папки
 		base := filepath.Base(path)
-		if base == ".git" || base == "vendor" || strings.HasPrefix(base, ".") {
+		if base == ".git" || base == "vendor" || base == "node_modules" {
 			return filepath.SkipDir
 		}
 
-		matches, _ := filepath.Glob(filepath.Join(path, "*.go"))
+		//  Отладка, показываем, куда зашли
+		rel, _ := filepath.Rel(*dir, path)
+		if rel == "." {
+			rel = "(root)"
+		}
+		fmt.Printf("→ %s\n", rel)
+
+		// Проверка go файлов
+		matches, err := filepath.Glob(filepath.Join(path, "*.go"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "glob error %s: %v\n", path, err)
+			return nil
+		}
 		if len(matches) == 0 {
 			return nil
 		}
 
-		fset := token.NewFileSet()
+		// Парсим пакет
 		pkgs, err := parser.ParseDir(fset, path, nil, parser.ParseComments)
 		if err != nil {
-			fmt.Printf("parse error %s: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "parse error %s: %v\n", path, err)
 			return nil
 		}
 
-		for _, pkg := range pkgs {
-			targets := resetgen.FindResetableStructs(pkg, fset)
-			// Если ничего не нашли, молчим
+		// Поиск структур
+		for pkgName, pkg := range pkgs {
+			// Передаём путь к директории пакета
+			targets := resetgen.FindResetableStructs(pkg, fset, path)
+
 			if len(targets) == 0 {
 				continue
 			}
 
-			rel, _ := filepath.Rel(*root, path)
-			pkgPath := rel
-			if pkgPath == "." {
-				pkgPath = "(root)"
-			}
+			fmt.Printf("  Package %s — find structs: %d\n", pkgName, len(targets))
 
-			// В обычном режиме выводим пакеты со структурами
-			fmt.Printf("Pckg %s (%s)\n", pkg.Name, rel)
+			// Добавляем все найденные структуры в карту по пути пакета
+			pkgTargets[path] = append(pkgTargets[path], targets...)
 
-			for _, t := range targets {
-				fmt.Printf("\t%s\n", t.Name)
-
-				if *verbose {
+			// Вывод
+			if *verbose {
+				for _, t := range targets {
+					fmt.Printf("    %s\n", t.Name)
 					for _, f := range t.Fields {
-						fmt.Printf(" %-20s %-30s %v\n", f.Name, f.Type, f.Kind)
+						fmt.Printf("      %-15s %-25s %v\n", f.Name, f.Type, f.Kind)
 					}
 					fmt.Println()
 				}
@@ -76,9 +92,25 @@ func main() {
 		return nil
 	})
 
-	if walkErr != nil {
-		fmt.Fprintln(os.Stderr, "WalkDir error: ", walkErr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WalkDir failed with err: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("\nСканирование завершено.")
+
+	fmt.Println("\n Scanning has been finished")
+
+	for pkgPath, targets := range pkgTargets {
+		if len(targets) == 0 {
+			continue
+		}
+
+		fmt.Printf("Gen of package %s (%d structs)\n", pkgPath, len(targets))
+
+		err := resetgen.GenerateResetMethods(pkgPath, targets)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error of gen %s: %v\n", pkgPath, err)
+		}
+	}
+
+	fmt.Println("\n Scanning has been finished")
 }

@@ -1,12 +1,13 @@
 package resetgen
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"strings"
 )
 
-func FindResetableStructs(pkg *ast.Package, fset *token.FileSet) []ResetTarget {
+func FindResetableStructs(pkg *ast.Package, fset *token.FileSet, pkgPath string) []ResetTarget {
 	var targets []ResetTarget
 
 	for _, file := range pkg.Files {
@@ -17,32 +18,38 @@ func FindResetableStructs(pkg *ast.Package, fset *token.FileSet) []ResetTarget {
 			}
 
 			hasMarker := false
-			for _, c := range gen.Doc.List {
-				if strings.TrimSpace(c.Text) == "// generate:reset" {
-					hasMarker = true
-					break
+			if gen.Doc != nil {
+				for _, c := range gen.Doc.List {
+					line := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
+					if line == "generate:reset" {
+						hasMarker = true
+						break
+					}
 				}
-			}
-			if !hasMarker {
+				if !hasMarker {
+					return true
+				}
+
+				for _, spec := range gen.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+
+					structType, ok := ts.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+
+					target := ResetTarget{
+						PkgPath: pkgPath,
+						PkgName: pkg.Name,
+						Name:    ts.Name.Name,
+						Fields:  extractFields(structType, fset),
+					}
+					targets = append(targets, target)
+				}
 				return true
-			}
-
-			for _, spec := range gen.Specs {
-				ts, ok := spec.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-
-				structType, ok := ts.Type.(*ast.StructType)
-				if !ok {
-					continue
-				}
-
-				target := ResetTarget{
-					Name:   ts.Name.Name,
-					Fields: extractFields(structType, fset),
-				}
-				targets = append(targets, target)
 			}
 			return true
 		})
@@ -61,6 +68,8 @@ func extractFields(st *ast.StructType, fset *token.FileSet) []StructField {
 		name := field.Names[0].Name
 		typeStr := exprToString(field.Type, fset)
 		kind := classifyField(field.Type)
+
+		fmt.Printf("Поле %s → TypeStr = %q, Kind = %v\n", name, typeStr, kind)
 
 		fields = append(fields, StructField{
 			Name: name,

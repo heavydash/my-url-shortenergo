@@ -1,8 +1,10 @@
 package resetgen
 
 type ResetTarget struct {
-	Name   string
-	Fields []StructField
+	PkgPath string
+	PkgName string
+	Name    string
+	Fields  []StructField
 }
 
 type StructField struct {
@@ -20,4 +22,6 @@ const (
 	KindMap
 	KindStruct
 	KindUnknown
+	KindEmbeddedStruct
+	KindNamedStruct
 )
