@@ -136,9 +136,17 @@ func (s *HTTPSender) Send(event *audit.Event) error {
 	// Выполняем запрос
 	resp, err := s.client.Do(req)
 	if err != nil {
+
 		return fmt.Errorf("http request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if resp == nil || resp.Body == nil {
+			return
+		}
+		if err = resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %s\n", err)
+		}
+	}()
 
 	// Проверяем статус ответа
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

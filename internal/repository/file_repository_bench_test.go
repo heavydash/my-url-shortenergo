@@ -20,7 +20,7 @@ func newTempFilerepo(b *testing.B) *FileRepository {
 
 	// Удаляем файл после завершения бенчмарка
 	b.Cleanup(func() {
-		os.Remove(tmpFile)
+		_ = os.Remove(tmpFile)
 	})
 	return repo
 }
@@ -63,7 +63,7 @@ func BenchmarkFileRepo_GetURL_NotFound(b *testing.B) {
 	repo := newTempFilerepo(b)
 
 	for i := 0; i < 200; i++ {
-		repo.SaveURL(model.URLModel{
+		_, _ = repo.SaveURL(model.URLModel{
 			OriginalURL: "http://example.com",
 		})
 	}

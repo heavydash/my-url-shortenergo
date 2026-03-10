@@ -31,7 +31,11 @@ func main() {
 	}
 	// Логгер
 	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	// Миграции, если есть DSN
 	if cfg.DatabaseDSN != "" {
@@ -89,7 +93,7 @@ func main() {
 
 	// Глобальные
 	router.Use(middleware.Logging(logger))
-	router.Use(middleware.GzipMiddleware)
+	router.Use(middleware.GzipMiddleware(logger))
 
 	router.Get("/{id}", h.RedirectURL)
 

@@ -230,7 +230,11 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
 	b := &pgx.Batch{}
 	for _, m := range batch {

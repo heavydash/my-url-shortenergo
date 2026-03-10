@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"compress/gzip"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
@@ -15,6 +16,7 @@ import (
 type gzipResponseWriter struct {
 	io.Writer
 	http.ResponseWriter
+	logger *zap.Logger
 }
 
 // Write записывает сжатые данные в исходящий поток.
@@ -29,7 +31,9 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 func (w *gzipResponseWriter) Flush() {
 	// Flush gzip буффера
 	if f, ok := w.Writer.(flusher); ok {
-		f.Flush()
+		if err := f.Flush(); err != nil {
+			w.logger.Error("Flush error")
+		}
 	}
 	// Flush оригинального соединения
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
@@ -92,47 +96,58 @@ var gzipWriterPool = sync.Pool{
 //   - Для больших файлов рекомендуется использовать отдельные эндпоинты без сжатия
 //   - Минимальный размер ответа для сжатия обычно 1KB (зависит от реализации)
 //   - Добавляет заголовок "Vary: Accept-Encoding" для корректного кэширования
-func GzipMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
-			gz, err := gzip.NewReader(r.Body)
-			if err != nil {
-				http.Error(w, "Bad Request", http.StatusBadRequest)
+func GzipMiddleware(logger *zap.Logger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+				gz, err := gzip.NewReader(r.Body)
+				if err != nil {
+					http.Error(w, "Bad Request", http.StatusBadRequest)
+					return
+				}
+				defer func() {
+					if err := gz.Close(); err != nil {
+						logger.Error("gzip reader close error", zap.Error(err))
+					}
+				}()
+				r.Body = gz
+			}
+
+			if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+				next.ServeHTTP(w, r)
 				return
 			}
-			defer gz.Close()
-			r.Body = gz
-		}
 
-		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
+			// Устанавливаем заголовки
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Vary", "Accept-Encoding")
 
-		// Устанавливаем заголовки
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Vary", "Accept-Encoding")
+			// Берем Writer из пула
+			gz := gzipWriterPool.Get().(*gzip.Writer)
 
-		// Берем Writer из пула
-		gz := gzipWriterPool.Get().(*gzip.Writer)
+			// Очищение состояния предыдущего использования
+			// Не аллоцируя новые структуры внутри
+			gz.Reset(w)
 
-		// Очищение состояния предыдущего использования
-		// Не аллоцируя новые структуры внутри
-		gz.Reset(w)
+			// Оборачиваем в структуру
+			gw := &gzipResponseWriter{
+				Writer:         gz,
+				ResponseWriter: w,
+				logger:         logger,
+			}
 
-		// Оборачиваем в структуру
-		gw := &gzipResponseWriter{
-			Writer:         gz,
-			ResponseWriter: w,
-		}
+			// Передаем управление следующему хендлеру
+			next.ServeHTTP(gw, r)
 
-		// Передаем управление следующему хендлеру
-		next.ServeHTTP(gw, r)
+			// Закрываем и возвращаем в пул
+			defer func() {
+				if err := gz.Close(); err != nil {
+					logger.Error("failed to close and return to pool", zap.Error(err))
+				}
+			}()
 
-		// Закрываем и возвращаем в пул
-		gz.Close()
-
-		// Возвращаем объект обратно в пул
-		gzipWriterPool.Put(gz)
-	})
+			// Возвращаем объект обратно в пул
+			gzipWriterPool.Put(gz)
+		})
+	}
 }

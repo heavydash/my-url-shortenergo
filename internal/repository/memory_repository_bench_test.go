@@ -54,7 +54,7 @@ func BenchmarkRepo_GetURLNotFound(b *testing.B) {
 
 	// Предзаполняем
 	for i := 0; i < 1000; i++ {
-		repo.SaveURL(model.URLModel{OriginalURL: "http://example.com/"})
+		_, _ = repo.SaveURL(model.URLModel{OriginalURL: "http://example.com/"})
 	}
 
 	b.ResetTimer()

@@ -20,7 +20,11 @@ import (
 func ExampleHandler_ShortenPlainHandler() {
 	// Инициализация зависимостей
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
@@ -34,7 +38,11 @@ func ExampleHandler_ShortenPlainHandler() {
 
 	// Сервис аудита (Noop, т.к. AuditFilePath и AuditRemoteURL не заданы)
 	auditSvc := service.New(cfg, logger)
-	defer auditSvc.Shutdown(context.Background())
+	defer func() {
+		if err := auditSvc.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
+	}()
 
 	// Создаем handler через конструктор
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
@@ -64,7 +72,11 @@ func ExampleHandler_ShortenPlainHandler() {
 // Пример перенаправления по короткой ссылке.
 func ExampleHandler_RedirectURL() {
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
@@ -78,7 +90,11 @@ func ExampleHandler_RedirectURL() {
 
 	// Сервис аудита
 	auditSvc := service.New(cfg, logger)
-	defer auditSvc.Shutdown(context.Background())
+	defer func() {
+		if err := auditSvc.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
+	}()
 
 	// Создаем handler
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
@@ -98,7 +114,11 @@ func ExampleHandler_RedirectURL() {
 // Пример проверки доступности БД через Ping.
 func ExampleHandler_PingHandler() {
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
@@ -107,7 +127,11 @@ func ExampleHandler_PingHandler() {
 
 	// Сервис аудита
 	auditSvc := service.New(&config.Config{}, logger)
-	defer auditSvc.Shutdown(context.Background())
+	defer func() {
+		if err := auditSvc.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
+	}()
 
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 
@@ -128,7 +152,11 @@ func ExampleHandler_PingHandler() {
 // Пример домашней страницы.
 func ExampleHandler_HomeHandler() {
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
@@ -139,7 +167,11 @@ func ExampleHandler_HomeHandler() {
 
 	// Сервис аудита
 	auditSvc := service.New(cfg, logger)
-	defer auditSvc.Shutdown(context.Background())
+	defer func() {
+		if err := auditSvc.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
+	}()
 
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 
@@ -162,12 +194,20 @@ func ExampleHandler_HomeHandler() {
 // Пример с неправильным методом для HomeHandler.
 func ExampleHandler_HomeHandler_wrongMethod() {
 	logger, _ := zap.NewDevelopment()
-	defer logger.Sync()
+	defer func() {
+		if err := logger.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 	cfg := &config.Config{}
 	auditSvc := service.New(cfg, logger)
-	defer auditSvc.Shutdown(context.Background())
+	defer func() {
+		if err := auditSvc.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
+	}()
 
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 

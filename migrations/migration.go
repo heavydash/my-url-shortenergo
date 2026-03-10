@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"log"
 	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -12,7 +13,11 @@ func RunMigrations(dsn string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if err = db.Close(); err != nil {
+			log.Printf("error closing db: %v", err)
+		}
+	}()
 
 	err = goose.Up(db, "migrations")
 	if err != nil {

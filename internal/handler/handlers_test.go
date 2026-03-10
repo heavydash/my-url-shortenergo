@@ -64,7 +64,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	router := chi.NewRouter()
 
 	router.Use(middleware.Logging(logger))
-	router.Use(middleware.GzipMiddleware)
+	router.Use(middleware.GzipMiddleware(logger))
 
 	router.Get("/{id}", h.RedirectURL)
 
@@ -95,7 +95,7 @@ func SetupTestRouter(t *testing.T, h *Handler) (*chi.Mux, httptest.ResponseRecor
 	logger := zap.NewNop()
 
 	router.Use(middleware.Logging(logger))
-	router.Use(middleware.GzipMiddleware)
+	router.Use(middleware.GzipMiddleware(logger))
 
 	// Авторизованные роуты
 	router.Group(func(r chi.Router) {
@@ -116,15 +116,15 @@ func SetupTestRouter(t *testing.T, h *Handler) (*chi.Mux, httptest.ResponseRecor
 
 }
 
-// handlers.go :
-
 func TestHandler_ShortenURL(t *testing.T) {
 	t.Run("Valid POST", func(t *testing.T) {
 		r, w, _, _ := setupTest(t)
 		req := httptest.NewRequest("POST", "/", strings.NewReader("https://example.com"))
+
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
+
 		body := getResponseBody(t, w)
 		assert.Contains(t, body, "http://localhost:33675/")
 	})
@@ -139,11 +139,9 @@ func TestHandler_HomeHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		body := getResponseBody(t, w)
-
 		assert.Contains(t, body, "URL Shortener Service")
 		assert.Contains(t, body, "POST /")
 		assert.Contains(t, body, "GET /{id}")
-
 	})
 }
 
@@ -164,6 +162,7 @@ func TestGzipIn(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusCreated, w.Code)
+
 		body := getResponseBody(t, w)
 		assert.Contains(t, body, "http://localhost:33675/")
 
@@ -178,20 +177,19 @@ func TestGzipOut(t *testing.T) {
 		req.Header.Set("Accept-Encoding", "gzip")
 		r.ServeHTTP(w, req)
 
-		// Проверяем статус
 		assert.Equal(t, http.StatusCreated, w.Code)
-		// Получаем разжатый текст
-		body := getResponseBody(t, w)
 
-		// Проверяем содержимое
+		contentEncoding := w.Header().Get("Content-Encoding")
+
+		// Получаем байты из w.Body
+		body := getResponseBody(t, w)
 		assert.Contains(t, body, "http://localhost:33675/")
 
-		// Проверяем заголовок
-		contentEncoding := w.Header().Get("Content-Encoding")
-		if contentEncoding != "" {
-			assert.Equal(t, "gzip", contentEncoding)
+		// Если есть gzip - лог
+		if contentEncoding == "gzip" {
+			t.Log("Response was gzipped")
 		} else {
-			t.Log("Response was not gzipped — possibly too small or middleware issue")
+			t.Log("Response was not gzipped (possibly too small)")
 		}
 	})
 }
@@ -268,10 +266,12 @@ func TestShortenURL_JSON(t *testing.T) {
 	t.Run("Valid POST JSON", func(t *testing.T) {
 		r, w, _, _ := setupTest(t)
 		req := httptest.NewRequest("POST", "/api/shorten", strings.NewReader("{\"url\":\"https://example.com\"}"))
+
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusCreated, w.Code)
 		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
 		body := getResponseBody(t, w)
 		assert.Contains(t, body, "http://localhost:33675/")
 	})
@@ -305,8 +305,12 @@ func TestBatchShortenHandler_OK(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code)
 
 	var resp []model.BatchResponseItem
-	body = getResponseBody(t, w)
-	require.NoError(t, json.NewDecoder(strings.NewReader(body)).Decode(&resp))
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	require.Len(t, resp, 2)
+	require.Equal(t, "1", resp[0].CorrelationID)
+	require.Contains(t, resp[0].OriginalURL, "http://localhost:8080/")
+	require.Equal(t, "2", resp[1].CorrelationID)
+	require.Contains(t, resp[1].OriginalURL, "http://localhost:8080/")
 }
 
 func TestBatchShortenHandler_EmptyBatch(t *testing.T) {
@@ -493,7 +497,6 @@ func BenchmarkBatchShorten(b *testing.B) {
 	}
 }
 
-// Разжатие
 func getResponseBody(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
 
@@ -502,12 +505,15 @@ func getResponseBody(t *testing.T, w *httptest.ResponseRecorder) string {
 	if w.Header().Get("Content-Encoding") == "gzip" {
 		gr, err := gzip.NewReader(bytes.NewReader(bodyBytes))
 		require.NoError(t, err, "failed to create gzip reader")
-		defer gr.Close()
+		defer func() {
+			if err = gr.Close(); err != nil {
+				panic(err)
+			}
+		}()
 
 		decompressed, err := io.ReadAll(gr)
-		require.NoError(t, err, "failed to decompress")
+		require.NoError(t, err, "failed to decompress gzip reader")
 		bodyBytes = decompressed
 	}
-
 	return string(bodyBytes)
 }

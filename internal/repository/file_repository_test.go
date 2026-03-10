@@ -13,7 +13,11 @@ import (
 func TestFileRepository(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "urls_*.json")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if err = tmpFile.Close(); err != nil {
+			_ = os.Remove(tmpFile.Name())
+		}
+	}()
 
 	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)
@@ -39,7 +43,11 @@ func TestFileRepository(t *testing.T) {
 func TestFileRepository_GetURL_Found(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "test_repo_*.json")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if err = tmpFile.Close(); err != nil {
+			_ = os.Remove(tmpFile.Name())
+		}
+	}()
 
 	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)
@@ -66,7 +74,11 @@ func TestFileRepository_GetURL_Found(t *testing.T) {
 func TestFileRepository_GetURL_NotFound(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "test_repo_*.json")
 	require.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	defer func() {
+		if err = tmpFile.Close(); err != nil {
+			_ = os.Remove(tmpFile.Name())
+		}
+	}()
 
 	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
 	require.NoError(t, err)

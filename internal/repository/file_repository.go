@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"io"
 	"os"
 	"sync"
@@ -46,6 +47,7 @@ type FileRepository struct {
 	encoder *json.Encoder
 	urls    map[string]model.URLModel
 	baseURL string
+	logger  *zap.Logger
 }
 
 // NewFileRepository создает новый FileRepository и загружает данные из файла.
@@ -103,7 +105,9 @@ func NewFileRepository(path string, baseURL string) *FileRepository {
 //   - Игнорирует синтаксические ошибки в отдельных строках
 //   - Сбрасывает позицию файла на начало (Seek(0, 0))
 func (r *FileRepository) loadFromFile() {
-	r.file.Seek(0, 0)
+	if _, err := r.file.Seek(0, 0); err != nil {
+		r.logger.Error("failed to seek to start file", zap.Error(err))
+	}
 	dec := json.NewDecoder(r.file)
 	for {
 		var u model.URLModel
