@@ -71,13 +71,6 @@ func ExampleHandler_ShortenPlainHandler() {
 
 // Пример перенаправления по короткой ссылке.
 func ExampleHandler_RedirectURL() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
-
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация
@@ -88,16 +81,9 @@ func ExampleHandler_RedirectURL() {
 		BaseURL:               "http://localhost:8080",
 	}
 
-	// Сервис аудита
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
-
+	noplogger := zap.NewNop()
 	// Создаем handler
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	h := handler.NewHandler(repo, cfg, noplogger, nil)
 
 	// Тестируем редирект на несуществующий URL
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
