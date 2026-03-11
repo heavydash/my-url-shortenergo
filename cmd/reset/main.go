@@ -1,3 +1,22 @@
+// Пакет main реализует утилиту командной строки для генерации методов Reset().
+//
+// Утилита рекурсивно обходит указанную директорию, находит все Go-файлы,
+// анализирует структуры, помеченные маркером //generate:reset, и генерирует
+// для них методы Reset(), сбрасывающие состояние в нулевые значения.
+//
+// Использование:
+//
+//	go run ./cmd/reset -dir ./internal -v
+//
+// Флаги:
+//
+//	-dir string    директория для сканирования (по умолчанию ".")
+//	-v            подробный вывод (показывает найденные структуры и поля)
+//
+// Сгенерированные файлы:
+//
+//	Для каждого пакета, содержащего структуры с маркером, создаётся файл
+//	<package>_reset.go с реализацией методов Reset() и конструкторов New<Type>().
 package main
 
 import (
@@ -11,6 +30,7 @@ import (
 )
 
 func main() {
+	// Парсинг флагов командной строки
 	dir := flag.String("dir", ".", "dir for scanning")
 	verbose := flag.Bool("v", false, "verbose output")
 	flag.Parse()
@@ -19,13 +39,16 @@ func main() {
 
 	fset := token.NewFileSet()
 
+	// Карта для хранения найденных целей по пути пакета
+	// Ключ: путь к пакету, значение: список структур для генерации
 	pkgTargets := make(map[string][]resetgen.ResetTarget)
 
+	// Рекурсивный обход директории
 	err := filepath.WalkDir(*dir, func(path string, d os.DirEntry, err error) error {
-		// Если ошибка доступа — печатаем, но продолжаем обход
+		// Обработка ошибок доступа
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to access %s: %v\n", path, err)
-			return nil // Если return err, весь обход стопнется
+			return nil // Продолжаем обход, не останавливаемся
 		}
 
 		// Обработка директории
@@ -53,7 +76,7 @@ func main() {
 			return nil
 		}
 		if len(matches) == 0 {
-			return nil
+			return nil // Нет Go-файлов — пропускаем
 		}
 
 		// Парсим пакет
@@ -74,10 +97,10 @@ func main() {
 
 			fmt.Printf("  Package %s — find structs: %d\n", pkgName, len(targets))
 
-			// Добавляем все найденные структуры в карту по пути пакета
+			// Сохраняем найденные цели
 			pkgTargets[path] = append(pkgTargets[path], targets...)
 
-			// Вывод
+			// вывод, если запрошен флаг -v
 			if *verbose {
 				for _, t := range targets {
 					fmt.Printf("    %s\n", t.Name)
@@ -99,6 +122,7 @@ func main() {
 
 	fmt.Println("\n Scanning has been finished")
 
+	// Генерация методов для каждого найденного пакета
 	for pkgPath, targets := range pkgTargets {
 		if len(targets) == 0 {
 			continue
