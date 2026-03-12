@@ -42,10 +42,12 @@ import (
 	_ "net/http/pprof" // Подключает pprof для профилирования
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
@@ -161,6 +163,14 @@ func main() {
 	// Создание сервиса аудита с несколькими отправителями
 	auditSvc := service.NewAuditService(cfg, logger, auditSenders...)
 
+	// Создаём deleter
+	urlDeleter := deleter.NewURLDeleter(
+		repo,
+		logger,
+		cfg.DeletionQueueBuffer,
+		cfg.DeletionFlushInterval,
+		cfg.DeletionMaxBatchSize,
+	)
 	// Создание основного обработчика HTTP-запросов
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 
@@ -230,45 +240,79 @@ func main() {
 
 	// Graceful shutdown
 	// Ожидаем сигналы SIGINT (Ctrl+C) или SIGTERM
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 
-	logger.Info("shutting down server...")
+	go func() {
+		stop := <-quit
 
-	// Контекст с таймаутом для завершения активных запросов
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
+		logger.Info("Received signal", zap.String("signal", stop.String()))
 
-	// Останавливаем HTTP-сервер
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("server shutdown failed", zap.Error(err))
-	}
+		// Контекст с таймаутом для завершения активных запросов
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
 
-	// Закрываем удалятор ссылок (если есть активные задачи)
-	if err := h.Close(); err != nil {
-		logger.Error("deleter shutting down failed", zap.Error(err))
-	}
+		// Останавливаем HTTP-сервер
+		logger.Info("HTTP server shutting down...")
+		if err := srv.Shutdown(ctx); err != nil {
+			logger.Error("Graceful shutdown server error", zap.Error(err))
+		} else {
+			logger.Info("HTTP-server has been stopped gracefully")
+		}
 
-	// Отдельный контекст для завершения аудита
-	// Аудиту даётся больше времени на отправку всех событий
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
-	defer cancel()
+		// Даём время deleter'у завершить все задачи
+		logger.Info("Deleter has been stopped...")
 
-	if err := auditSvc.Shutdown(shutdownCtx); err != nil {
-		logger.Error("audit shutdown failed", zap.Error(err))
-	} else {
-		logger.Info("audit shutdown gracefully")
-	}
+		if urlDeleter != nil {
+			if err := urlDeleter.Close(); err != nil {
+				logger.Error("Error of deleter service", zap.Error(err))
+			} else {
+				logger.Info("Deleter has been stopped gracefully")
+			}
+		}
 
-	// Если используется PostgreSQL, закрываем соединение
-	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
-		if err := pgRepo.Close(); err != nil {
-			logger.Error("failed to close postgres repo", zap.Error(err))
+		// Останавливаем аудит-сервис (с отдельным таймаутом, если нужно больше времени)
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
+		defer auditCancel()
+
+		logger.Info("Stop audit service...")
+		if err := auditSvc.Shutdown(auditCtx); err != nil {
+			logger.Error("Error of graceful shutdown audit service", zap.Error(err))
+		} else {
+			logger.Info("Audit service has been stopped gracefully")
+		}
+
+		// Если используется PostgreSQL, закрываем соединение
+		if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
+			logger.Info("Close connection to PostgreSQL...")
+			if err := pgRepo.Close(); err != nil {
+
+				logger.Error("failed to close postgres repo", zap.Error(err))
+			}
+		}
+
+		// Безопасно закрываем логгер
+		logger.Info("Close logger...")
+		if err := zap.L().Sync(); err != nil {
+			// Игнори ошибок при быстром закрытии в терминале/тестах
+			if !errors.Is(err, syscall.ENOTTY) && // inappropriate ioctl
+				!errors.Is(err, syscall.EBADF) && // bad file descriptor
+				!strings.Contains(err.Error(), "sync /dev/stderr") {
+				logger.Error("Error sync of logger", zap.Error(err))
+			}
+		}
+
+		logger.Info("Server has been gracefully shutdown")
+	}()
+	// Запуск сервера
+	logger.Info("Server has been started", zap.String("addr", srv.Addr))
+	if err := srv.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			logger.Info("Server has been stopped")
+		} else {
+			logger.Fatal("Error of starting of the server", zap.Error(err))
 		}
 	}
-	logger.Info("server stopped gracefully")
-
 }
 
 // valueOrNA возвращает переданную строку или "N/A", если строка пустая.
