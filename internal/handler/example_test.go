@@ -137,29 +137,20 @@ func ExampleHandler_PingHandler() {
 
 // Пример домашней страницы.
 func ExampleHandler_HomeHandler() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
 
 	repo := repository.NewMemoryRepository("http://localhost:8080")
 
 	// Конфигурация
 	cfg := &config.Config{
-		BaseURL: "http://localhost:8080",
+		BaseURL:               "http://localhost:8080",
+		DeletionQueueBuffer:   1000,
+		DeletionFlushInterval: 500 * time.Millisecond,
+		DeletionMaxBatchSize:  1000,
 	}
 
-	// Сервис аудита
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
+	nopLogger := zap.NewNop()
 
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	h := handler.NewHandler(repo, cfg, nopLogger, nil)
 
 	// Запрос на корневой путь
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -179,23 +170,18 @@ func ExampleHandler_HomeHandler() {
 
 // Пример с неправильным методом для HomeHandler.
 func ExampleHandler_HomeHandler_wrongMethod() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
-
 	repo := repository.NewMemoryRepository("http://localhost:8080")
-	cfg := &config.Config{}
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
 
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	cfg := &config.Config{
+		BaseURL:               "http://localhost:8080",
+		DeletionQueueBuffer:   1000,
+		DeletionFlushInterval: 500 * time.Millisecond,
+		DeletionMaxBatchSize:  1000,
+	}
+
+	nopLogger := zap.NewNop()
+
+	h := handler.NewHandler(repo, cfg, nopLogger, nil)
 
 	// POST запрос на корневой путь (должен вернуть 405)
 	req := httptest.NewRequest(http.MethodPost, "/", nil)

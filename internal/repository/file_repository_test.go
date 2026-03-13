@@ -1,9 +1,10 @@
 package repository
 
 import (
-	"github.com/google/uuid"
 	"os"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/stretchr/testify/assert"

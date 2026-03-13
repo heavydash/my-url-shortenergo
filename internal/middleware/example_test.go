@@ -3,10 +3,11 @@ package middleware
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 // Пример работы GzipMiddleware со сжатием ответа.

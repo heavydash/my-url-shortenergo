@@ -5,16 +5,15 @@ package models
 import "time"
 
 func (s *ShortLink) Reset() {
-    if s == nil {
-        return
-    }
+	if s == nil {
+		return
+	}
 
-    s.ID = 0
-    s.Short = ""
-    s.Original = ""
-    s.Clicks = 0
-    s.CreatedAt = time.Time{}
- s.Tags = s.Tags[:0]
-    clear(s.Meta)
+	s.ID = 0
+	s.Short = ""
+	s.Original = ""
+	s.Clicks = 0
+	s.CreatedAt = time.Time{}
+	s.Tags = s.Tags[:0]
+	clear(s.Meta)
 }
-

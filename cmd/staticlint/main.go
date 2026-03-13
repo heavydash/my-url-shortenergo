@@ -32,8 +32,9 @@ import (
 	"golang.org/x/tools/go/analysis/passes/printf"
 	"golang.org/x/tools/go/analysis/passes/shadow"
 
-	"honnef.co/go/tools/staticcheck"
 	"strings"
+
+	"honnef.co/go/tools/staticcheck"
 )
 
 // Multichecker — объединённый инструмент статического анализа для проекта сокращателя URL.

@@ -32,18 +32,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
-	_ "github.com/joho/godotenv/autoload" // Автоматическая загрузка .env файла
-	"go.uber.org/zap"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof" // Подключает pprof для профилирования
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+
+	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
+	_ "github.com/joho/godotenv/autoload" // Автоматическая загрузка .env файла
+	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
@@ -218,12 +221,36 @@ func main() {
 		Addr:    cfg.ServerAddr, // Адрес для прослушивания
 		Handler: router}
 
-	// Запуск сервера в горутине
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal("failed to start server", zap.Error(err))
+	// Запуск сервера с явным контролем над портом и флагами
+	logger.Info("Try to start srv", zap.String("requested_addr", srv.Addr))
+
+	// Создаём низкоуровневый TCP-listener
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		logger.Fatal("failed to listen", zap.Error(err))
+	}
+
+	// Доступ к файловому дескриптору сокета
+	if tcpLn, ok := ln.(*net.TCPListener); ok {
+		file, err := tcpLn.File()
+		if err != nil {
+			logger.Error("failed to get file descriptor", zap.Error(err))
+		} else {
+			fd := file.Fd()
+			unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+			unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			logger.Info("SO_REUSEADDR and SO_REUSEPORT enabled")
 		}
-	}()
+	}
+
+	// Логируем реальный порт, на который привязались
+	realAddr := ln.Addr().String()
+	logger.Info("Srv conn to port", zap.String("actual_addr", realAddr))
+
+	// Запускаем HTTP-сервер на этом listener
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal("failed to serve", zap.Error(err))
+	}
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 

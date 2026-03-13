@@ -22,11 +22,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/cmd/reset/internal/resetgen"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+
+	"github.com/heavydash/my-url-shortenergo/cmd/reset/internal/resetgen"
 )
 
 func main() {
