@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"go.uber.org/zap"
 	"os"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestFileRepository(t *testing.T) {
 		}
 	}()
 
-	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080", zap.NewNop())
 	require.NoError(t, err)
 
 	url := model.URLModel{
@@ -29,7 +30,7 @@ func TestFileRepository(t *testing.T) {
 	}
 
 	// Save
-	saved, err := repo.SaveURL(url)
+	saved, err := repo.SaveURL(t.Context(), url)
 	require.NoError(t, err)
 
 	// Проверки
@@ -50,7 +51,7 @@ func TestFileRepository_GetURL_Found(t *testing.T) {
 		}
 	}()
 
-	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080", zap.NewNop())
 	require.NoError(t, err)
 
 	// Сначала сохраняем
@@ -60,11 +61,11 @@ func TestFileRepository_GetURL_Found(t *testing.T) {
 		UserID:      uuid.New(),
 	}
 
-	saved, err := repo.SaveURL(url)
+	saved, err := repo.SaveURL(t.Context(), url)
 	require.NoError(t, err)
 
 	// Потом получаем
-	got, err := repo.GetURL(saved.ShortURL)
+	got, err := repo.GetURL(t.Context(), saved.ShortURL)
 	require.NoError(t, err)
 	assert.Equal(t, saved.UUID, got.UUID) // Используем UUID вместо ID
 	assert.Equal(t, saved.OriginalURL, got.OriginalURL)
@@ -81,11 +82,11 @@ func TestFileRepository_GetURL_NotFound(t *testing.T) {
 		}
 	}()
 
-	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080")
+	repo := NewFileRepository(tmpFile.Name(), "http://localhost:8080", zap.NewNop())
 	require.NoError(t, err)
 	// defer repo.Close() // Убрали
 
-	_, err = repo.GetURL("nonexistent")
+	_, err = repo.GetURL(t.Context(), "nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }

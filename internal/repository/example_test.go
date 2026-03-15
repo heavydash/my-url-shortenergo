@@ -4,6 +4,7 @@ package repository_test
 import (
 	"context"
 	"fmt"
+	"go.uber.org/zap"
 	"os"
 
 	"github.com/google/uuid"
@@ -13,7 +14,7 @@ import (
 
 // Пример работы с MemoryRepository.
 func ExampleMemoryRepository() {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	defer func() {
 		if err := repo.Clear(); err != nil {
 			panic(err)
@@ -29,7 +30,7 @@ func ExampleMemoryRepository() {
 		UserID:      userID,
 	}
 
-	savedURL, err := repo.SaveURL(url)
+	savedURL, err := repo.SaveURL(context.Background(), url)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -39,7 +40,7 @@ func ExampleMemoryRepository() {
 	fmt.Printf("Saved Short URL: %s\n", savedURL.ShortURL)
 
 	// Получаем URL
-	retrievedURL, err := repo.GetURL(savedURL.ShortURL)
+	retrievedURL, err := repo.GetURL(context.Background(), savedURL.ShortURL)
 	if err != nil {
 		fmt.Printf("Error retrieving: %v\n", err)
 		return
@@ -68,7 +69,7 @@ func ExampleFileRepository() {
 		}
 	}()
 
-	repo := repository.NewFileRepository(tmpfile.Name(), "http://localhost:8080")
+	repo := repository.NewFileRepository(tmpfile.Name(), "http://localhost:8080", zap.NewNop())
 	// В реальном коде: defer repo.file.Close()
 
 	userID := uuid.New()
@@ -80,7 +81,7 @@ func ExampleFileRepository() {
 		UserID:      userID,
 	}
 
-	_, err = repo.SaveURL(url)
+	_, err = repo.SaveURL(context.Background(), url)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -96,7 +97,7 @@ func ExampleFileRepository() {
 
 // Пример получения URL пользователя.
 func ExampleMemoryRepository_GetURLsByUser() {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	defer func() {
 		if err := repo.Clear(); err != nil {
 			panic(err)
@@ -112,7 +113,7 @@ func ExampleMemoryRepository_GetURLsByUser() {
 	}
 
 	for _, url := range urls {
-		_, _ = repo.SaveURL(url)
+		_, _ = repo.SaveURL(context.Background(), url)
 	}
 
 	// Получаем URL пользователя

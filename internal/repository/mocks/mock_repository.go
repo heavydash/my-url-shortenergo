@@ -51,18 +51,18 @@ func (mr *MockURLRepositoryMockRecorder) Clear() *gomock.Call {
 }
 
 // GetURL mocks base method.
-func (m *MockURLRepository) GetURL(id string) (model.URLModel, error) {
+func (m *MockURLRepository) GetURL(ctx context.Context, id string) (*model.URLModel, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetURL", id)
-	ret0, _ := ret[0].(model.URLModel)
+	ret := m.ctrl.Call(m, "GetURL", ctx, id)
+	ret0, _ := ret[0].(*model.URLModel)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetURL indicates an expected call of GetURL.
-func (mr *MockURLRepositoryMockRecorder) GetURL(id interface{}) *gomock.Call {
+func (mr *MockURLRepositoryMockRecorder) GetURL(ctx, id interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURL", reflect.TypeOf((*MockURLRepository)(nil).GetURL), id)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetURL", reflect.TypeOf((*MockURLRepository)(nil).GetURL), ctx, id)
 }
 
 // GetURLsByUser mocks base method.
@@ -81,17 +81,17 @@ func (mr *MockURLRepositoryMockRecorder) GetURLsByUser(ctx, userID interface{}) 
 }
 
 // MarkAsDeleted mocks base method.
-func (m *MockURLRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+func (m *MockURLRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, shortURLs []string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "MarkAsDeleted", userID, shortURLs)
+	ret := m.ctrl.Call(m, "MarkAsDeleted", ctx, userID, shortURLs)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // MarkAsDeleted indicates an expected call of MarkAsDeleted.
-func (mr *MockURLRepositoryMockRecorder) MarkAsDeleted(userID, shortURLs interface{}) *gomock.Call {
+func (mr *MockURLRepositoryMockRecorder) MarkAsDeleted(ctx, userID, shortURLs interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAsDeleted", reflect.TypeOf((*MockURLRepository)(nil).MarkAsDeleted), userID, shortURLs)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkAsDeleted", reflect.TypeOf((*MockURLRepository)(nil).MarkAsDeleted), ctx, userID, shortURLs)
 }
 
 // Ping mocks base method.
@@ -123,16 +123,16 @@ func (mr *MockURLRepositoryMockRecorder) SaveBatch(ctx, batch interface{}) *gomo
 }
 
 // SaveURL mocks base method.
-func (m_2 *MockURLRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
+func (m_2 *MockURLRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
 	m_2.ctrl.T.Helper()
-	ret := m_2.ctrl.Call(m_2, "SaveURL", m)
+	ret := m_2.ctrl.Call(m_2, "SaveURL", ctx, m)
 	ret0, _ := ret[0].(model.URLModel)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // SaveURL indicates an expected call of SaveURL.
-func (mr *MockURLRepositoryMockRecorder) SaveURL(m interface{}) *gomock.Call {
+func (mr *MockURLRepositoryMockRecorder) SaveURL(ctx, m interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveURL", reflect.TypeOf((*MockURLRepository)(nil).SaveURL), m)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveURL", reflect.TypeOf((*MockURLRepository)(nil).SaveURL), ctx, m)
 }

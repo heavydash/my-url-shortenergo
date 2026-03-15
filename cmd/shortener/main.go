@@ -131,7 +131,7 @@ func main() {
 		if err != nil {
 			// Если PostgreSQL недоступен, падаем обратно на файл/память
 			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
-			repo = repository.NewMemoryRepository(cfg.BaseURL)
+			repo = repository.NewMemoryRepository(cfg.BaseURL, logger)
 		} else {
 			logger.Info("using postgres storage")
 			repo = repository.NewPostgresRepository(pool.Pool, logger, cfg.BaseURL)
@@ -139,11 +139,11 @@ func main() {
 	} else if cfg.FileStoragePath != "" {
 		// Используем файловое хранилище
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
-		repo = repository.NewFileRepository(cfg.FileStoragePath, cfg.BaseURL)
+		repo = repository.NewFileRepository(cfg.FileStoragePath, cfg.BaseURL, logger)
 	} else {
 		// Используем in-memory хранилище
 		logger.Info("using in-memory storage")
-		repo = repository.NewMemoryRepository(cfg.BaseURL)
+		repo = repository.NewMemoryRepository(cfg.BaseURL, logger)
 	}
 
 	// Настройка системы аудита

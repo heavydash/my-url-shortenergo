@@ -62,7 +62,7 @@ func TestPostgresRepository_SaveURL(t *testing.T) {
 		OriginalURL: "http://example.com",
 	}
 
-	saved, err := repo.SaveURL(*url)
+	saved, err := repo.SaveURL(t.Context(), *url)
 	require.NoError(t, err, "failed to save url")
 
 	t.Logf("Saved URL: %+v", saved)
@@ -86,7 +86,7 @@ func TestPostgresRepository_SaveURL_WithShortURL(t *testing.T) {
 		ShortURL:    shortURL,
 	}
 
-	saved, err := repo.SaveURL(url)
+	saved, err := repo.SaveURL(t.Context(), url)
 	require.NoError(t, err, "failed to save url")
 
 	t.Logf("Saved URL: %+v", saved)
@@ -104,11 +104,11 @@ func TestPostgresRepository_SaveURL_Conflict(t *testing.T) {
 	}
 
 	// Первое сохранение
-	firstSave, err := repo.SaveURL(*url)
+	firstSave, err := repo.SaveURL(t.Context(), *url)
 	require.NoError(t, err, "failed to save url")
 
 	// Повторное сохранение
-	secondSave, err := repo.SaveURL(*url)
+	secondSave, err := repo.SaveURL(t.Context(), *url)
 
 	// Проверяем, что именно ErrConflict
 	require.Error(t, err, "expected conflict error")
@@ -139,14 +139,14 @@ func TestPostgresRepository_GetURL_Found(t *testing.T) {
 		ShortURL:    shortURL,
 	}
 
-	saved, err := repo.SaveURL(*url)
+	saved, err := repo.SaveURL(t.Context(), *url)
 	require.NoError(t, err, "failed to save url")
 
 	// Убедимся, что short_url сохранился
 	require.NotEmpty(t, saved.ShortURL, "ShortURL should not be empty for this test")
 
 	// Ищем по short_url
-	got, err := repo.GetURL(saved.ShortURL)
+	got, err := repo.GetURL(t.Context(), saved.ShortURL)
 	require.NoError(t, err, "GetURL failed")
 
 	assert.Equal(t, saved.ID, got.ID, "should return existing ID")
@@ -158,7 +158,7 @@ func TestPostgresRepository_GetURL_Found(t *testing.T) {
 func TestPostgresRepository_GetURL_NotFound(t *testing.T) {
 	repo := newTestPostgresRepo(t)
 
-	_, err := repo.GetURL("nonexistent-uuid")
+	_, err := repo.GetURL(t.Context(), "nonexistent-uuid")
 	require.Error(t, err, "expected error or not found")
 
 	assert.Contains(t, strings.ToLower(err.Error()), "not found",
@@ -185,7 +185,7 @@ func TestPostgresRepository_GetURL_Deleted(t *testing.T) {
 	require.NoError(t, err)
 
 	// Получаем через GetURL
-	got, err := repo.GetURL(shortURL)
+	got, err := repo.GetURL(t.Context(), shortURL)
 	require.NoError(t, err, "GetURL should still work for deleted URLs")
 	assert.True(t, got.IsDeleted, "should be marked as deleted")
 	assert.Equal(t, id, got.ID, "ID should match")

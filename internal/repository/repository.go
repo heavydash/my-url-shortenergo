@@ -24,33 +24,47 @@ import (
 // Используется handler'ами для абстракции над конкретным бэкендом хранения.
 //
 // Все методы должны быть потокобезопасными при использовании в конкурентной среде.
+// Все методы, принимающие контекст, должны учитывать его отмену и таймауты.
 type URLRepository interface {
 	// SaveURL сохраняет URL в хранилище.
 	//
 	// Параметры:
-	//   m - модель URL для сохранения. Поле UUID может быть пустым для автоматической генерации.
+	//   ctx - контекст для отмены операции и таймаутов
+	//   m   - модель URL для сохранения. Поле UUID может быть пустым для автоматической генерации
 	//
 	// Возвращает:
 	//   model.URLModel - сохраненная запись с заполненными полями UUID и ShortURL
 	//   error - ошибка если URL уже существует или возникла проблема при сохранении
 	//
 	// Пример:
+	//   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	//   defer cancel()
 	//   url := model.URLModel{OriginalURL: "https://example.com"}
-	//   saved, err := repo.SaveURL(url)
-	SaveURL(m model.URLModel) (model.URLModel, error)
+	//   saved, err := repo.SaveURL(ctx, url)
+	SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error)
 
 	// GetURL возвращает URL по его короткому идентификатору.
 	//
 	// Параметры:
-	//   id - короткий идентификатор URL (UUID или сгенерированная строка)
+	//   ctx - контекст для отмены операции и таймаутов
+	//   id  - короткий идентификатор URL (UUID или сгенерированная строка)
 	//
 	// Возвращает:
-	//   model.URLModel - найденная запись URL
-	//   error - ошибка если URL не найден или был удален
+	//   *model.URLModel - указатель на копию найденной записи URL (nil если не найден)
+	//   error - ошибка если URL не найден (для совместимости с другими репозиториями)
+	//
+	// Особенности:
+	//   - Возвращается указатель на копию для безопасности в конкурентной среде
+	//   - При отсутствии URL возвращается (nil, ошибка)
+	//   - Не проверяет флаг IsDeleted - проверка на уровне сервиса
 	//
 	// Пример:
-	//   url, err := repo.GetURL("abc123")
-	GetURL(id string) (model.URLModel, error)
+	//   url, err := repo.GetURL(ctx, "abc123")
+	//   if err != nil {
+	//       // URL не найден
+	//   }
+	//   fmt.Println(url.OriginalURL)
+	GetURL(ctx context.Context, id string) (*model.URLModel, error)
 
 	// SaveBatch сохраняет несколько URL за одну операцию.
 	// Используется для эффективного пакетного создания коротких URL.
@@ -111,6 +125,7 @@ type URLRepository interface {
 	// Используется для асинхронного удаления через URLDeleter.
 	//
 	// Параметры:
+	//   ctx       - контекст для отмены операции и таймаутов
 	//   userID    - UUID пользователя, который удаляет URL
 	//   shortURLs - список коротких идентификаторов URL для удаления
 	//
@@ -120,5 +135,5 @@ type URLRepository interface {
 	// Примечание:
 	//   - Метод должен проверять принадлежность URL пользователю
 	//   - Удаление только своих URL (без прав на удаление чужих)
-	MarkAsDeleted(userID uuid.UUID, shortURLs []string) error
+	MarkAsDeleted(ctx context.Context, userID uuid.UUID, shortURLs []string) error
 }

@@ -66,7 +66,7 @@ func BenchmarkPostgresRepo_Save(b *testing.B) {
 			ShortURL:    fmt.Sprintf("s%d", i),
 		}
 
-		_, err := repo.SaveURL(url)
+		_, err := repo.SaveURL(b.Context(), url)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func BenchmarkPostgresRepo_GetURL(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		letterIndex := i % 26
 		shortURL := string(letters[letterIndex])
-		_, err := repo.GetURL(shortURL)
+		_, err := repo.GetURL(b.Context(), shortURL)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func BenchmarkPostgresRepo_Conflict(b *testing.B) {
 		ShortURL:    "base",
 	}
 
-	_, err := repo.SaveURL(baseURL)
+	_, err := repo.SaveURL(b.Context(), baseURL)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func BenchmarkPostgresRepo_Conflict(b *testing.B) {
 			ShortURL:    fmt.Sprintf("conflict%d", i),
 		}
 
-		_, err := repo.SaveURL(confictURL)
+		_, err := repo.SaveURL(b.Context(), confictURL)
 		if err != nil && !isConflictError(err) {
 			b.Fatal(err)
 		}

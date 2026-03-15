@@ -26,7 +26,7 @@ func ExampleHandler_ShortenPlainHandler() {
 		}
 	}()
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -71,7 +71,7 @@ func ExampleHandler_ShortenPlainHandler() {
 
 // Пример перенаправления по короткой ссылке.
 func ExampleHandler_RedirectURL() {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -106,7 +106,7 @@ func ExampleHandler_PingHandler() {
 		}
 	}()
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация (может быть nil для тестов)
 	var cfg *config.Config // nil config допустимо
@@ -138,7 +138,7 @@ func ExampleHandler_PingHandler() {
 // Пример домашней страницы.
 func ExampleHandler_HomeHandler() {
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -170,7 +170,7 @@ func ExampleHandler_HomeHandler() {
 
 // Пример с неправильным методом для HomeHandler.
 func ExampleHandler_HomeHandler_wrongMethod() {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	cfg := &config.Config{
 		BaseURL:               "http://localhost:8080",
