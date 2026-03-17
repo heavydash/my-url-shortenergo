@@ -96,6 +96,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	// Создание логгера (JSON-формат, уровни info и выше)
 	logger, _ := zap.NewProduction()
