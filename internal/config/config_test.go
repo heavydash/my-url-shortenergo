@@ -1,6 +1,7 @@
 package config
 
 import (
+	"go.uber.org/zap"
 	"os"
 	"testing"
 
@@ -30,18 +31,20 @@ func TestNewConfig(t *testing.T) {
 		os.Args = []string{"test"}
 		defer func() { os.Args = originalArgs }()
 
-		cfg, err := NewConfig()
+		logger := zap.NewNop()
+		cfg, err := NewConfig(logger)
 		require.NoError(t, err)
 		assert.Contains(t, []string{":9090", "localhost:9090"}, cfg.ServerAddr)
 		assert.Equal(t, "http://example.com", cfg.BaseURL)
 	})
 	//Ничего не задано
 	t.Run("default values", func(t *testing.T) {
+		logger := zap.NewNop()
 		originalArgs := os.Args
 		os.Args = []string{"test"}
 		defer func() { os.Args = originalArgs }()
 
-		cfg, err := NewConfig()
+		cfg, err := NewConfig(logger)
 		require.NoError(t, err)
 		assert.Contains(t, []string{":8080", "localhost:8080"}, cfg.ServerAddr)
 		assert.Equal(t, "http://localhost:8080", cfg.BaseURL)
@@ -54,7 +57,8 @@ func TestNewConfig_FileStoragePath(t *testing.T) {
 		os.Args = []string{"test", "-f", "/tmp/urls.json"}
 		defer func() { os.Args = originalArgs }()
 
-		cfg, err := NewConfig()
+		logger := zap.NewNop()
+		cfg, err := NewConfig(logger)
 		require.NoError(t, err)
 		assert.Equal(t, "/tmp/urls.json", cfg.FileStoragePath)
 	})
@@ -63,7 +67,8 @@ func TestNewConfig_FileStoragePath(t *testing.T) {
 		os.Args = []string{"test", "-f", ""}
 		defer func() { os.Args = originalArgs }()
 
-		cfg, err := NewConfig()
+		logger := zap.NewNop()
+		cfg, err := NewConfig(logger)
 		require.NoError(t, err)
 		assert.Equal(t, "", cfg.FileStoragePath)
 	})
@@ -72,7 +77,8 @@ func TestNewConfig_FileStoragePath(t *testing.T) {
 		os.Args = []string{"test", "-f", ""}
 		defer func() { os.Args = originalArgs }()
 
-		cfg, err := NewConfig()
+		logger := zap.NewNop()
+		cfg, err := NewConfig(logger)
 		require.NoError(t, err)
 		assert.Equal(t, "", cfg.FileStoragePath)
 	})

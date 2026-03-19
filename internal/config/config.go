@@ -4,8 +4,10 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"go.uber.org/zap"
 	"os"
 	"strconv"
 	"strings"
@@ -196,11 +198,23 @@ type Config struct {
 	// Флаг: -db-health-period, env: DB_HEALTH_PERIOD, default: "1m"
 	DBHealthCheckPeriod time.Duration
 
+	// Поля для HTTPS
+
+	// EnableHTTPS - включение HTTPS (TLS) для сервера.
+	// Флаг: -enable-https, env: ENABLE_HTTPS
 	EnableHTTPS bool
 
+	// TLSCert - путь к файлу сертификата TLS.
+	// Флаг: -tls-cert, env: TLS_CERT
 	TLSCert string
 
+	// TLSKey - путь к файлу приватного ключа TLS.
+	// Флаг: -tls-key, env: TLS_KEY
 	TLSKey string
+
+	// logger - внутренний логгер для конфигурации.
+	// Не экспортируется, используется для отладки загрузки.
+	logger *zap.Logger
 }
 
 // NewConfig создает и загружает конфигурацию приложения.
@@ -243,15 +257,20 @@ type Config struct {
 //	-shutdown-timeout : таймаут graceful shutdown (default: 10s)
 //	-ping-timeout : таймаут ping БД (default: 2s)
 //	-http-client-timeout : таймаут HTTP клиента (default: 5s)
-func NewConfig() (*Config, error) {
+//	-enable-https : включение HTTPS (default: false)
+//	-tls-cert : путь к TLS сертификату (default: "server.crt")
+//	-tls-key : путь к TLS ключу (default: "server.key")
+func NewConfig(logger *zap.Logger) (*Config, error) {
 	fs := flag.NewFlagSet("url-shortener", flag.ContinueOnError)
+
+	// Флаг для пути к json
+	configFile := fs.String("c", "", "path to JSON config file")
 
 	// Флаги серверные
 	a := fs.String("a", ":8080", "address to run HTTP server")
 	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
 	d := fs.String("d", "", "DSN to store the URL")
-	//s := fs.String("s", "", "http server address") я подумал ты хочешь так сделать
 
 	// Флаги для Deleter
 	dq := fs.Int("dq", 1000, "deletion queue buffer size (default 1000)")
@@ -286,38 +305,169 @@ func NewConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// cfg с Дефолтными значениями
 	cfg := &Config{
-		ServerAddr:      *a,
-		BaseURL:         *b,
-		FileStoragePath: *f,
-		DatabaseDSN:     *d,
+		// Srv
+		ServerAddr:      ":8080",
+		BaseURL:         "http://localhost:8080",
+		FileStoragePath: "",
+		DatabaseDSN:     "",
 		// Deleter
-		DeletionQueueBuffer:   *dq,
-		DeletionFlushInterval: parseDuration(*df, 50*time.Millisecond),
-		DeletionMaxBatchSize:  *dm,
+		DeletionQueueBuffer:   1000,
+		DeletionFlushInterval: 50 * time.Millisecond,
+		DeletionMaxBatchSize:  1000,
 		// Audit
-		AuditFilePath:        *auditFileFlag,
-		AuditRemoteURL:       *auditURLFlag,
-		AuditBufferSize:      *auditBufferSize,
-		AuditShutdownTimeout: *auditShutdownTimeout,
+		AuditFilePath:        "",
+		AuditRemoteURL:       "",
+		AuditBufferSize:      4096,
+		AuditShutdownTimeout: 15 * time.Second,
 		//db
-		DBMaxConns:          *dbMaxConns,
-		DBMinConns:          *dbMinConns,
-		DBMaxConnLifetime:   *dbMaxLifetime,
-		DBHealthCheckPeriod: *dbHealthPeriod,
+		DBMaxConns:          20,
+		DBMinConns:          5,
+		DBMaxConnLifetime:   5 * time.Minute,
+		DBHealthCheckPeriod: 1 * time.Minute,
 		// Timeout
-		ServerTimeout:     *serverTimeoutFlag,
-		InitTimeout:       *initTimeoutFlag,
-		ShutdownTimeout:   *shutdownTimeoutFlag,
-		PingTimeout:       *pingTimeoutFlag,
-		HTTPClientTimeout: *httpClientTimeout,
+		ServerTimeout:     5 * time.Second,
+		InitTimeout:       15 * time.Second,
+		ShutdownTimeout:   10 * time.Second,
+		PingTimeout:       2 * time.Second,
+		HTTPClientTimeout: 5 * time.Second,
 		//HTTPS
-		EnableHTTPS: *enableHTTPS,
-		TLSCert:     *tlsCert,
-		TLSKey:      *tlsKey,
+		EnableHTTPS: false,
+		TLSCert:     "",
+		TLSKey:      "",
+	}
+
+	// Определяем путь к JSON
+	var jsonPath string
+	if *configFile != "" {
+		jsonPath = *configFile
+	} else if val := os.Getenv("CONFIG"); val != "" {
+		jsonPath = val
+	}
+
+	if jsonPath != "" {
+		logger.Info("attempting to load JSON config", zap.String("path", jsonPath))
+		if err := loadFromJSON(jsonPath, cfg, logger); err != nil {
+			logger.Warn("failed to load JSON config, falling back to flags/env", zap.Error(err))
+		} else {
+			logger.Info("successfully loaded JSON config", zap.String("path", jsonPath))
+		}
+	} else {
+		logger.Debug("no JSON config file specified, falling back to flags/env")
+	}
+
+	// Дефолты флагов для проверки
+	// Srv
+	defaultA := ":8080"
+	defaultB := "http://localhost:8080"
+	defaultF := ""
+	defaultD := ""
+	// Deletion
+	defaultDQ := 1000
+	defaultDF := "50ms"
+	defaultDM := 1000
+	// Audit
+	defaultAuditFile := ""
+	defaultAuditURL := ""
+	defaultAuditBuffer := 4096
+	defaultAuditShutdown := 15 * time.Second
+	// DB
+	defaultDBMaxConns := 20
+	defaultDBMinConns := 5
+	defaultDBMaxLifetime := 5 * time.Minute
+	defaultDBHealthPeriod := 1 * time.Minute
+	// Timeout
+	defaultServerTimeout := 5 * time.Second
+	defaultInitTimeout := 15 * time.Second
+	defaultShutdownTimeout := 10 * time.Second
+	defaultPingTimeout := 2 * time.Second
+	// HTTPS
+	defaultHTTPClientTimeout := 5 * time.Second
+	defaultEnableHTTPS := false
+	defaultTLSCert := "server.crt"
+	defaultTLSKey := "server.key"
+
+	// Применяем флаги, если они отличаются от дефолта
+	if *a != defaultA {
+		cfg.ServerAddr = *a
+	}
+	if *b != defaultB {
+		cfg.BaseURL = *b
+	}
+	if *f != defaultF {
+		cfg.FileStoragePath = *f
+	}
+	if *d != defaultD {
+		cfg.DatabaseDSN = *d
+	}
+	if *dq != defaultDQ {
+		cfg.DeletionQueueBuffer = *dq
+	}
+	if *df != defaultDF {
+		cfg.DeletionFlushInterval = parseDuration(*df, 50*time.Millisecond)
+	}
+	if *dm != defaultDM {
+		cfg.DeletionMaxBatchSize = *dm
+	}
+	if *auditFileFlag != defaultAuditFile {
+		cfg.AuditFilePath = *auditFileFlag
+	}
+	if *auditURLFlag != defaultAuditURL {
+		cfg.AuditRemoteURL = *auditURLFlag
+	}
+	if *auditBufferSize != defaultAuditBuffer {
+		cfg.AuditBufferSize = *auditBufferSize
+	}
+	if *auditShutdownTimeout != defaultAuditShutdown {
+		cfg.AuditShutdownTimeout = *auditShutdownTimeout
+	}
+	if *dbMaxConns != defaultDBMaxConns {
+		cfg.DBMaxConns = *dbMaxConns
+	}
+	if *dbMinConns != defaultDBMinConns {
+		cfg.DBMinConns = *dbMinConns
+	}
+	if *dbMaxLifetime != defaultDBMaxLifetime {
+		cfg.DBMaxConnLifetime = *dbMaxLifetime
+	}
+	if *dbHealthPeriod != defaultDBHealthPeriod {
+		cfg.DBHealthCheckPeriod = *dbHealthPeriod
+	}
+	if *serverTimeoutFlag != defaultServerTimeout {
+		cfg.ServerTimeout = *serverTimeoutFlag
+	}
+	if *initTimeoutFlag != defaultInitTimeout {
+		cfg.InitTimeout = *initTimeoutFlag
+	}
+	if *shutdownTimeoutFlag != defaultShutdownTimeout {
+		cfg.ShutdownTimeout = *shutdownTimeoutFlag
+	}
+	if *pingTimeoutFlag != defaultPingTimeout {
+		cfg.PingTimeout = *pingTimeoutFlag
+	}
+	if *httpClientTimeout != defaultHTTPClientTimeout {
+		cfg.HTTPClientTimeout = *httpClientTimeout
+	}
+	if *enableHTTPS != defaultEnableHTTPS {
+		cfg.EnableHTTPS = *enableHTTPS
+	}
+	if *tlsCert != defaultTLSCert {
+		cfg.TLSCert = *tlsCert
+	}
+	if *tlsKey != defaultTLSKey {
+		cfg.TLSKey = *tlsKey
 	}
 
 	overwriteFromEnv(cfg)
+
+	cfg.Normalize()
+	if err := cfg.Validate(logger); err != nil {
+		logger.Error("configuration validation failed", zap.Error(err))
+		return nil, err
+	}
+	logger.Info("configuration validated successfully")
+
 	return cfg, nil
 }
 
@@ -348,12 +498,15 @@ func NewConfig() (*Config, error) {
 //	SHUTDOWN_TIMEOUT         : таймаут graceful shutdown
 //	PING_TIMEOUT             : таймаут ping БД
 //	HTTP_CLIENT_TIMEOUT      : таймаут HTTP клиента
+//	ENABLE_HTTPS             : включение HTTPS
+//	TLS_CERT                 : путь к TLS сертификату
+//	TLS_KEY                  : путь к TLS ключу
 //
 // Примеры duration для интервалов:
 //
 //	"50ms", "1s", "2m30s", "1h"
 func overwriteFromEnv(cfg *Config) {
-
+	// Srv
 	if val, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
 		cfg.ServerAddr = val
 	}
@@ -384,7 +537,7 @@ func overwriteFromEnv(cfg *Config) {
 		}
 	}
 
-	// Аудит
+	// Audit
 	if val, ok := os.LookupEnv("AUDIT_FILE"); ok {
 		cfg.AuditFilePath = val
 	}
@@ -403,7 +556,7 @@ func overwriteFromEnv(cfg *Config) {
 		}
 	}
 
-	// Таймауты
+	// Timeout
 	if val, ok := os.LookupEnv("SERVER_TIMEOUT"); ok {
 		if dur, err := time.ParseDuration(val); err == nil && dur > 0 {
 			cfg.ServerTimeout = dur
@@ -429,7 +582,7 @@ func overwriteFromEnv(cfg *Config) {
 			cfg.HTTPClientTimeout = dur
 		}
 	}
-
+	// HTTPS
 	if val, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
 		cfg.EnableHTTPS = val == "true" || val == "1" || val == "yes"
 	}
@@ -461,21 +614,29 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
-func (c *Config) Validate() error {
+// Validate проверяет корректность конфигурации.
+// Возвращает ошибку если конфигурация невалидна.
+func (c *Config) Validate(logger *zap.Logger) error {
 	if c.EnableHTTPS {
 		if c.TLSCert == "" {
+			logger.Error("validation failed: TLS cert missing when HTTPS enabled")
 			return fmt.Errorf("TLS enabled but TLS cert is missing")
 		}
 		if c.TLSKey == "" {
+			logger.Error("validation failed: TLS key missing when HTTPS enabled")
 			return fmt.Errorf("TLS enabled but TLS key is missing")
 		}
 	}
 	if c.ServerAddr == "" {
+		logger.Error("validation failed: server address missing")
 		return fmt.Errorf("Server address is missing")
 	}
+	logger.Debug("configuration validated successfully")
 	return nil
 }
 
+// Normalize приводит конфигурацию к каноническому виду.
+// Например, заменяет http:// на https:// в BaseURL если включен HTTPS.
 func (c *Config) Normalize() {
 	if !c.EnableHTTPS {
 		return
@@ -498,4 +659,177 @@ func (c *Config) Normalize() {
 	}
 
 	c.BaseURL = "https://" + base
+}
+
+// loadFromJSON загружает конфигурацию из JSON файла.
+// Параметры из JSON имеют приоритет над дефолтами, но уступают флагам и env.
+func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		logger.Warn("cannot read config file", zap.String("path", path), zap.Error(err))
+		return nil
+	}
+
+	var fileCfg struct {
+		// Srv
+		ServerAddr      string `json:"server_addr"`
+		BaseURL         string `json:"base_url"`
+		FileStoragePath string `json:"file_storage_path"`
+		DatabaseDSN     string `json:"database_dsn"`
+		// Deleter
+		DeletionQueueBuffer   *int   `json:"deletion_queue_buffer"`
+		DeletionFlushInterval string `json:"deletion_flush_interval"`
+		DeletionMaxBatchSize  *int   `json:"deletion_max_batch_size"`
+		// Audit
+		AuditFilePath        string `json:"audit_file_path"`
+		AuditRemoteURL       string `json:"audit_remote_url"`
+		AuditBufferSize      *int   `json:"audit_buffer_size"`
+		AuditShutdownTimeout string `json:"audit_shutdown_timeout"`
+		// db
+		DBMaxConns            *int   `json:"db_max_conns"`
+		DBMinConns            *int   `json:"db_min_conns"`
+		DBMaxConnLifetime     string `json:"db_max_conn_lifetime"`
+		DBHealthCheckInterval string `json:"db_health_check_interval"`
+		// Timeout
+		ServerTimeout     string `json:"server_timeout"`
+		InitTimeout       string `json:"init_timeout"`
+		ShutdownTimeout   string `json:"shutdown_timeout"`
+		PingTimeout       string `json:"ping_timeout"`
+		HTTPClientTimeout string `json:"http_client_timeout"`
+		// HTTPS
+		EnableHTTPS *bool  `json:"enable_https"`
+		TLSCert     string `json:"tls_cert"`
+		TLSKey      string `json:"tls_key"`
+	}
+
+	if err := json.Unmarshal(data, &fileCfg); err != nil {
+		logger.Error("invalid JSON format", zap.String("path", path), zap.Error(err))
+		return err
+	}
+
+	logger.Debug("JSON config parsed", zap.String("path", path))
+
+	// Srv
+	if fileCfg.ServerAddr != "" {
+		cfg.ServerAddr = fileCfg.ServerAddr
+	}
+	if fileCfg.BaseURL != "" {
+		cfg.BaseURL = fileCfg.BaseURL
+	}
+	if fileCfg.FileStoragePath != "" {
+		cfg.FileStoragePath = fileCfg.FileStoragePath
+	}
+	if fileCfg.DatabaseDSN != "" {
+		cfg.DatabaseDSN = fileCfg.DatabaseDSN
+	}
+	// Deleter
+	if fileCfg.DeletionQueueBuffer != nil {
+		cfg.DeletionQueueBuffer = *fileCfg.DeletionQueueBuffer
+	}
+	if fileCfg.DeletionFlushInterval != "" {
+		dur, err := time.ParseDuration(fileCfg.DeletionFlushInterval)
+		if err != nil {
+			logger.Error("deletion_flush_interval invalid", zap.Error(err))
+			return err
+		}
+		cfg.DeletionFlushInterval = dur
+	}
+	if fileCfg.DeletionMaxBatchSize != nil {
+		cfg.DeletionMaxBatchSize = *fileCfg.DeletionMaxBatchSize
+	}
+	// Audit
+	if fileCfg.AuditFilePath != "" {
+		cfg.AuditFilePath = fileCfg.AuditFilePath
+	}
+	if fileCfg.AuditRemoteURL != "" {
+		cfg.AuditRemoteURL = fileCfg.AuditRemoteURL
+	}
+	if fileCfg.AuditBufferSize != nil {
+		cfg.AuditBufferSize = *fileCfg.AuditBufferSize
+	}
+	if fileCfg.AuditShutdownTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.AuditShutdownTimeout)
+		if err != nil {
+			logger.Error("audit_shutdown_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.AuditShutdownTimeout = dur
+	}
+	// DB
+	if fileCfg.DBMaxConns != nil {
+		cfg.DBMaxConns = *fileCfg.DBMaxConns
+	}
+	if fileCfg.DBMinConns != nil {
+		cfg.DBMinConns = *fileCfg.DBMinConns
+	}
+	if fileCfg.DBMaxConnLifetime != "" {
+		dur, err := time.ParseDuration(fileCfg.DBMaxConnLifetime)
+		if err != nil {
+			logger.Error("db_max_conn_lifetime invalid", zap.Error(err))
+			return err
+		}
+		cfg.DBMaxConnLifetime = dur
+	}
+	if fileCfg.DBHealthCheckInterval != "" {
+		dur, err := time.ParseDuration(fileCfg.DBHealthCheckInterval)
+		if err != nil {
+			logger.Error("db_health_check_interval invalid", zap.Error(err))
+			return err
+		}
+		cfg.DBHealthCheckPeriod = dur
+	}
+	// Timeout
+	if fileCfg.ServerTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.ServerTimeout)
+		if err != nil {
+			logger.Error("server_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.ServerTimeout = dur
+	}
+	if fileCfg.InitTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.InitTimeout)
+		if err != nil {
+			logger.Error("init_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.InitTimeout = dur
+	}
+	if fileCfg.ShutdownTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.ShutdownTimeout)
+		if err != nil {
+			logger.Error("shutdown_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.ShutdownTimeout = dur
+	}
+	if fileCfg.PingTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.PingTimeout)
+		if err != nil {
+			logger.Error("ping_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.PingTimeout = dur
+	}
+	// HTTPS
+	if fileCfg.HTTPClientTimeout != "" {
+		dur, err := time.ParseDuration(fileCfg.HTTPClientTimeout)
+		if err != nil {
+			logger.Error("client_timeout invalid", zap.Error(err))
+			return err
+		}
+		cfg.HTTPClientTimeout = dur
+	}
+
+	if fileCfg.EnableHTTPS != nil {
+		cfg.EnableHTTPS = *fileCfg.EnableHTTPS
+	}
+	if fileCfg.TLSCert != "" {
+		cfg.TLSCert = fileCfg.TLSCert
+	}
+	if fileCfg.TLSKey != "" {
+		cfg.TLSKey = fileCfg.TLSKey
+	}
+	return nil
+
 }
