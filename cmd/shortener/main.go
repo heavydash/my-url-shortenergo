@@ -32,29 +32,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/go-chi/chi/v5"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/config/db"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
+	"github.com/heavydash/my-url-shortenergo/internal/handler"
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"github.com/heavydash/my-url-shortenergo/migrations"
 	"log"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // Подключает pprof для профилирования
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
+	"time"
 
-	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	_ "github.com/joho/godotenv/autoload" // Автоматическая загрузка .env файла
 	"go.uber.org/zap"
 	"golang.org/x/sys/unix"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/deleter"
-	"github.com/heavydash/my-url-shortenergo/internal/handler"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
-	"github.com/heavydash/my-url-shortenergo/migrations"
 )
 
 // Переменные версии заполняются при сборке через ldflags.
@@ -104,7 +104,7 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to load config", zap.Error(err))
 	}
-	log.Printf("Config after load:\n%+v", cfg)
+	logger.Debug("Config after load:\n%+v")
 
 	if err := cfg.Validate(logger); err != nil {
 		logger.Fatal("invalid configuration", zap.Error(err))
@@ -221,21 +221,45 @@ func main() {
 
 	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP) // Пакетное создание
 
-	// Настройка HTTP-сервера
+	// Настройка graceful shutdown с отслеживанием сигналов ОС.
+	// Поддерживаются сигналы:
+	//   - Ctrl+C (SIGINT)
+	//   - SIGTERM (стандартный сигнал завершения от ОС)
+	//   - SIGQUIT (обычно генерируется при завершении терминала)
+	ctx, stop := signal.NotifyContext(context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
+	defer stop() // Освобождаем ресурсы signal.NotifyContext после завершения
+
+	// Настройка HTTP-сервера с таймаутами.
+	// ReadTimeout  - таймаут на чтение всего запроса (включая тело)
+	// WriteTimeout - таймаут на отправку ответа
+	// IdleTimeout  - таймаут на keep-alive соединения
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr, // Адрес для прослушивания
-		Handler: router}
+		Handler: router,
+
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  65 * time.Second,
+	}
 
 	// Запуск сервера с явным контролем над портом и флагами
 	logger.Info("Try to start srv", zap.String("requested_addr", srv.Addr))
 
-	// Создаём низкоуровневый TCP-listener
+	// Создаём TCP-listener вручную, чтобы иметь доступ к сокету.
+	// Это даёт возможность установить SO_REUSEADDR и SO_REUSEPORT
+	// для быстрого перезапуска без ошибки "address already in use".
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		logger.Fatal("failed to listen", zap.Error(err))
 	}
 
-	// Доступ к файловому дескриптору сокета
+	// Включаем опции сокета для быстрого переиспользования порта.
+	// SO_REUSEADDR - позволяет переиспользовать порт в состоянии TIME_WAIT
+	// SO_REUSEPORT - позволяет нескольким процессам слушать один порт
 	if tcpLn, ok := ln.(*net.TCPListener); ok {
 		file, err := tcpLn.File()
 		if err != nil {
@@ -248,19 +272,27 @@ func main() {
 		}
 	}
 
-	// Логируем реальный порт, на который привязались
+	// Логируем реальный порт, на который привязались.
+	// Может отличаться от запрошенного, если указан ":0" (случайный порт).
 	realAddr := ln.Addr().String()
 	logger.Info("Srv conn to port", zap.String("actual_addr", realAddr))
 
-	// Запускаем HTTP-сервер на этом listener
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Fatal("failed to serve", zap.Error(err))
-	}
+	// Канал для ошибок сервера, чтобы не блокировать main горутину.
+	serverErr := make(chan error, 1)
+
+	// Запускаем HTTP-сервер в отдельной горутине.
+	go func() {
+		logger.Info("Starting HTTP server")
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+		log.Println("HTTP server stopped")
+	}()
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 
-	// Запуск pprof для профилирования
-	// Доступно по адресу http://localhost:6060/debug/pprof/
+	// Запуск pprof сервера для профилирования в отдельной горутине.
+	// Доступен по адресу http://localhost:6060/debug/pprof/
 	go func() {
 		pprofAddr := "localhost:6060"
 		logger.Info("pprof server started", zap.String("addr", "http://"+pprofAddr+"/debug/pprof"))
@@ -270,80 +302,82 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
-	// Ожидаем сигналы SIGINT (Ctrl+C) или SIGTERM
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	startTime := time.Now() // Засекаем время старта для логов
 
-	go func() {
-		stop := <-quit
+	// Ожидаем либо ошибку сервера, либо сигнал завершения.
+	select {
+	case err := <-serverErr:
+		// Сервер упал сам по себе (не по сигналу)
+		logger.Fatal("HTTP server failed to start", zap.Error(err))
 
-		logger.Info("Received signal", zap.String("signal", stop.String()))
+	case <-ctx.Done():
+		// Получен сигнал завершения (Ctrl+C, SIGTERM, SIGQUIT)
+		logger.Info("Shutdown signal received",
+			zap.String("signal", ctx.Err().Error()),
+			zap.Duration("time_since_start", time.Since(startTime)))
 
-		// Контекст с таймаутом для завершения активных запросов
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
+		stop() // второй Ctrl+C теперь мгновенно убивает
 
-		// Останавливаем HTTP-сервер
-		logger.Info("HTTP server shutting down...")
-		if err := srv.Shutdown(ctx); err != nil {
-			logger.Error("Graceful shutdown server error", zap.Error(err))
-		} else {
-			logger.Info("HTTP-server has been stopped gracefully")
-		}
+		// Graceful shutdown HTTP сервера.
+		// Даём серверу cfg.ShutdownTimeout секунд на завершение активных запросов.
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
 
-		// Даём время deleter'у завершить все задачи
-		logger.Info("Deleter has been stopped...")
+		logger.Info("Shutting down HTTP server...")
 
+		// Запускаем Shutdown в фоне, чтобы не блокировать остальные компоненты.
+		go func() {
+			_ = srv.Shutdown(shutdownCtx)
+		}()
+
+		<-shutdownCtx.Done() // Ждём завершения или таймаута
+
+		// Закрываем URLDeleter (асинхронный удалятор).
+		// Deleter имеет свой внутренний буфер, нужно дать ему время дописать.
+		deleterStart := time.Now()
+		logger.Info("Closing URL deleter...")
 		if urlDeleter != nil {
 			if err := urlDeleter.Close(); err != nil {
-				logger.Error("Error of deleter service", zap.Error(err))
+				logger.Error("failed to close url deleter", zap.Error(err))
 			} else {
-				logger.Info("Deleter has been stopped gracefully")
+				logger.Info("url deleter closed")
 			}
 		}
+		logger.Info("URL deleter closed", zap.Duration("took", time.Since(deleterStart)))
 
-		// Останавливаем аудит-сервис (с отдельным таймаутом, если нужно больше времени)
-		auditCtx, auditCancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
+		// Закрываем сервис аудита.
+		// У него свой буфер событий, нужно дождаться отправки всех.
+		auditStart := time.Now()
+		logger.Info("Shutting down audit service...")
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer auditCancel()
-
-		logger.Info("Stop audit service...")
 		if err := auditSvc.Shutdown(auditCtx); err != nil {
-			logger.Error("Error of graceful shutdown audit service", zap.Error(err))
+			logger.Error("Audit shutdown failed", zap.Error(err))
 		} else {
-			logger.Info("Audit service has been stopped gracefully")
+			logger.Info("Audit shutdown completed", zap.Duration("took", time.Since(auditStart)))
 		}
 
-		// Если используется PostgreSQL, закрываем соединение
+		// Закрываем соединение с PostgreSQL, если оно было открыто.
 		if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
-			logger.Info("Close connection to PostgreSQL...")
+			pgStart := time.Now()
+			logger.Info("Closing PostgreSQL...")
 			if err := pgRepo.Close(); err != nil {
-
-				logger.Error("failed to close postgres repo", zap.Error(err))
+				logger.Error("failed to close postgres repository", zap.Error(err))
+			} else {
+				logger.Info("PostgreSQL closed", zap.Duration("took", time.Since(pgStart)))
 			}
 		}
+		logger.Info("All resources finished gracefully")
+		logger.Sync() // Сбрасываем буфер логгера
 
-		// Безопасно закрываем логгер
-		logger.Info("Close logger...")
-		if err := zap.L().Sync(); err != nil {
-			// Игнори ошибок при быстром закрытии в терминале/тестах
-			if !errors.Is(err, syscall.ENOTTY) && // inappropriate ioctl
-				!errors.Is(err, syscall.EBADF) && // bad file descriptor
-				!strings.Contains(err.Error(), "sync /dev/stderr") {
-				logger.Error("Error sync of logger", zap.Error(err))
-			}
-		}
+		// Форс-мажорный выход через 2 секунды, если что-то зависло.
+		go func() {
+			time.Sleep(2 * time.Second)
+			logger.Fatal("Принудительный выход — что-то зависло")
+			os.Exit(1)
+		}()
 
-		logger.Info("Server has been gracefully shutdown")
-	}()
-	// Запуск сервера
-	logger.Info("Server has been started", zap.String("addr", srv.Addr))
-	if err := srv.ListenAndServe(); err != nil {
-		if errors.Is(err, http.ErrServerClosed) {
-			logger.Info("Server has been stopped")
-		} else {
-			logger.Fatal("Error of starting of the server", zap.Error(err))
-		}
+		os.Exit(0) // Нормальный выход
 	}
 }
 
