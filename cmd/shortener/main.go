@@ -90,16 +90,6 @@ func main() {
 	fmt.Printf("Build commit:  %s\n", valueOrNA(buildCommit))
 	fmt.Println("---")
 
-	// Инициализация конфигурации
-	// Читает переменные окружения и флаги командной строки
-	cfg, err := config.NewConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err := cfg.Validate(); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
-	}
-
 	// Создание логгера (JSON-формат, уровни info и выше)
 	logger, _ := zap.NewProduction()
 	defer func() {
@@ -107,6 +97,18 @@ func main() {
 			panic(err)
 		}
 	}()
+
+	// Инициализация конфигурации
+	// Читает переменные окружения и флаги командной строки
+	cfg, err := config.NewConfig(logger)
+	if err != nil {
+		logger.Fatal("failed to load config", zap.Error(err))
+	}
+	log.Printf("Config after load:\n%+v", cfg)
+
+	if err := cfg.Validate(logger); err != nil {
+		logger.Fatal("invalid configuration", zap.Error(err))
+	}
 
 	// Запуск миграций базы данных, если указан DSN
 	// Миграции выполняются перед инициализацией репозитория

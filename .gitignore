@@ -34,3 +34,5 @@ autotests/
 cookie*.txt
 *.log
 
+shortener
+config.json
