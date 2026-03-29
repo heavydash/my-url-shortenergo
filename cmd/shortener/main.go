@@ -221,6 +221,13 @@ func main() {
 
 	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP) // Пакетное создание
 
+	// Маршруты с опциональной авторизацией
+	// Внутренние служебные эндпоинты (для мониторинга, администрирования и т.д.)
+	// Защищены проверкой IP-подсети (trusted_subnet), а не cookie
+	router.Group(func(r chi.Router) {
+		r.Get("/api/internal/stats", h.GetInternalStats)
+	})
+
 	// Настройка graceful shutdown с отслеживанием сигналов ОС.
 	// Поддерживаются сигналы:
 	//   - Ctrl+C (SIGINT)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -552,4 +553,37 @@ func (p *PostgresRepository) Close() error {
 		p.logger.Info("postgres: closed pool")
 	}
 	return nil
+}
+
+// Stats возвращает статистику сервиса из PostgreSQL.
+//
+// Реализация:
+//   - Выполняет один SQL-запрос:
+//     SELECT COUNT(*) AS urls, COUNT(DISTINCT user_id) AS users FROM urls
+//   - Использует контекст с таймаутом 5 секунд.
+//   - При любой ошибке (включая отмену контекста или проблемы с соединением)
+//     возвращает (0, 0) и логирует ошибку на уровне Error.
+//
+// Преимущества:
+//   - Высокая производительность даже при миллионах записей (благодаря индексам PostgreSQL).
+//   - Не блокирует приложение надолго.
+//   - Масштабируется линейно с ростом базы данных.
+func (p *PostgresRepository) Stats() (urls int, users int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if ctx.Err() != nil {
+		p.logger.Warn("Stats canceled by context", zap.Error(ctx.Err()))
+		return 0, 0
+	}
+
+	query := `SELECT COUNT(*) AS urls,
+       COUNT(DISTINCT user_id) AS users FROM urls`
+
+	err := p.pool.QueryRow(ctx, query).Scan(&urls, &users)
+	if err != nil {
+		p.logger.Error("Failed to get stats from PostgreSQL", zap.Error(err))
+		return 0, 0
+	}
+	return urls, users
 }

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"go.uber.org/zap"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -212,6 +213,32 @@ type Config struct {
 	// Флаг: -tls-key, env: TLS_KEY
 	TLSKey string
 
+	// TrustedSubnet — CIDR-нотация доверенной подсети, из которой разрешён доступ
+	// к внутренним административным эндпоинтам (например, /api/internal/stats).
+	//
+	// Примеры корректных значений:
+	//   "127.0.0.1/32"     — только localhost
+	//   "192.168.0.0/16"   — вся локальная сеть 192.168.0.0–192.168.255.255
+	//   "10.0.0.0/8"       — вся подсеть 10.0.0.0/8
+	//   "172.16.0.0/12"    — подсеть Docker/Kubernetes по умолчанию
+	//
+	// Если поле пустое (""), то:
+	//   • доступ к /api/internal/stats будет запрещён для всех IP-адресов
+	//   • isRequestFromTrustedSubnet() всегда возвращает false
+	//   • в логах при старте будет сообщение "trusted subnet is empty - stats will be forbidden for everyone"
+	//
+	// Проверка выполняется по заголовку X-Real-IP (не по r.RemoteAddr).
+	//
+	// Флаг: -t, env: TRUSTED_SUBNET
+	// JSON: "trusted_subnet"
+	TrustedSubnet string `json:"trusted_subnet"`
+
+	// TrustedSubnetNet — разобранная CIDR-подсеть.
+	// Заполняется автоматически в NewConfig() после парсинга TrustedSubnet.
+	// Не экспортируется в JSON и не должна устанавливаться вручную.
+	// Если TrustedSubnet пустой или некорректный — остаётся nil.
+	TrustedSubnetNet *net.IPNet `json:"-"`
+
 	// logger - внутренний логгер для конфигурации.
 	// Не экспортируется, используется для отладки загрузки.
 	logger *zap.Logger
@@ -301,6 +328,9 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 	tlsCert := fs.String("tls-cert", "server.crt", "path to TLS certificate file")
 	tlsKey := fs.String("tls-key", "server.key", "path to TLS private key file")
 
+	// Флаги для Subnet
+	trustedSubnet := fs.String("t", "", "trusted subnet in CIDR notation (e.g. 192.168.0.0/16)")
+
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, err
 	}
@@ -332,10 +362,13 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 		ShutdownTimeout:   10 * time.Second,
 		PingTimeout:       2 * time.Second,
 		HTTPClientTimeout: 5 * time.Second,
-		//HTTPS
+		// HTTPS
 		EnableHTTPS: false,
 		TLSCert:     "",
 		TLSKey:      "",
+		// Subnet
+		TrustedSubnet:    "",
+		TrustedSubnetNet: nil,
 	}
 
 	// Определяем путь к JSON
@@ -458,8 +491,26 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 	if *tlsKey != defaultTLSKey {
 		cfg.TLSKey = *tlsKey
 	}
+	if *trustedSubnet != "" {
+		cfg.TrustedSubnet = *trustedSubnet
+	}
 
 	overwriteFromEnv(cfg)
+
+	if cfg.TrustedSubnet != "" {
+		_, ipnet, err := net.ParseCIDR(cfg.TrustedSubnet)
+		if err != nil {
+			logger.Error("invalid trusted subnet",
+				zap.String("subnet", cfg.TrustedSubnet),
+				zap.Error(err))
+			return nil, fmt.Errorf("invalid trusted subnet %q: %w", cfg.TrustedSubnet, err)
+		}
+		cfg.TrustedSubnetNet = ipnet
+		logger.Info("trusted subnet configured",
+			zap.String("subnet", cfg.TrustedSubnet))
+	} else {
+		logger.Info("trusted subnet is empty - stats will be forbidden for everyone")
+	}
 
 	cfg.Normalize()
 	if err := cfg.Validate(logger); err != nil {
@@ -594,6 +645,11 @@ func overwriteFromEnv(cfg *Config) {
 	if val, ok := os.LookupEnv("TLS_KEY"); ok {
 		cfg.TLSKey = val
 	}
+
+	// Subnet
+	if val, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		cfg.TrustedSubnet = val
+	}
 }
 
 // parseDuration парсит строку duration с fallback значением.
@@ -631,6 +687,11 @@ func (c *Config) Validate(logger *zap.Logger) error {
 		logger.Error("validation failed: server address missing")
 		return fmt.Errorf("Server address is missing")
 	}
+
+	if c.TrustedSubnet != "" && c.TrustedSubnetNet == nil {
+		return fmt.Errorf("trusted_subnet %q is set but could not be parsed as valid CIDR", c.TrustedSubnet)
+	}
+
 	logger.Debug("configuration validated successfully")
 	return nil
 }
@@ -700,6 +761,8 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 		EnableHTTPS *bool  `json:"enable_https"`
 		TLSCert     string `json:"tls_cert"`
 		TLSKey      string `json:"tls_key"`
+		// Subnet
+		TrustedSubnet string `json:"trusted_subnet"`
 	}
 
 	if err := json.Unmarshal(data, &fileCfg); err != nil {
@@ -830,6 +893,11 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 	if fileCfg.TLSKey != "" {
 		cfg.TLSKey = fileCfg.TLSKey
 	}
+
+	if fileCfg.TrustedSubnet != "" {
+		cfg.TrustedSubnet = fileCfg.TrustedSubnet
+	}
+
 	return nil
 
 }

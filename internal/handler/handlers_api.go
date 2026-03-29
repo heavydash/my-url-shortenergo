@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -269,4 +270,90 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// GetInternalStats обрабатывает GET /api/internal/stats
+//
+// Возвращает JSON с общей статистикой сервиса:
+//
+//	{
+//	  "urls":  12345,
+//	  "users": 987
+//	}
+//
+// Доступ разрешён **только** из доверенной подсети, указанной в конфигурации (TrustedSubnetNet).
+// Проверка выполняется по заголовку X-Real-IP.
+//
+// Примеры ответов:
+//
+//	200 OK          - статистика успешно возвращена
+//	403 Forbidden   - запрос не из доверенной подсети
+//
+// Использует репозиторий через вызов repo.Stats().
+func (h *Handler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
+	// Проверка доступа из доверенной подсети
+	if !h.isRequestFromTrustedSubnet(r) {
+		h.logger.Warn("GetInternalStats: access denied: not trusted subnet IP",
+			zap.String("remote_addr", r.RemoteAddr),
+			zap.String("x_real_ip", r.Header.Get("X-Real-IP")))
+
+		h.sendError(w, true, "Forbidden", http.StatusForbidden)
+		return
+
+	}
+
+	// Получаем статистику
+	urls, users := h.repo.Stats()
+
+	h.logger.Info("GetInternalStats: success",
+		zap.Int("urls", urls),
+		zap.Int("users", users))
+
+	// Формируем ответ
+	response := struct {
+		URLs  int `json:"urls"`
+		Users int `json:"users"`
+	}{
+		URLs:  urls,
+		Users: users,
+	}
+	// Успех, отправляем ответ
+	h.sendResponse(w, true, response, http.StatusOK)
+}
+
+// isRequestFromTrustedSubnet проверяет, пришёл ли HTTP-запрос из доверенной подсети.
+//
+// Логика проверки (строго по порядку):
+//  1. Если в конфигурации не задана TrustedSubnetNet (nil) → возвращает false.
+//  2. Если в заголовке запроса отсутствует X-Real-IP → возвращает false.
+//  3. Если значение X-Real-IP не удаётся распарсить как корректный IP → возвращает false
+//     и логирует предупреждение.
+//  4. Если IP входит в подсеть TrustedSubnetNet → возвращает true.
+//
+// Примечание:
+//
+//	Метод не выполняет никаких side-effect'ов, кроме логирования некорректного IP.
+//	Используется исключительно в GetInternalStats.
+func (h *Handler) isRequestFromTrustedSubnet(r *http.Request) bool {
+	// Проверка конфигурации
+	if h.cfg == nil || h.cfg.TrustedSubnetNet == nil {
+		return false
+	}
+
+	// Извлекаем IP адрес
+	ipStr := r.Header.Get("X-Real-IP")
+	if ipStr == "" {
+		return false
+	}
+
+	// Парсим IP
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		h.logger.Warn("isRequestFromTrustedSubnet: invalid IP in X-Real-IP header",
+			zap.String("ip", ipStr))
+		return false
+	}
+
+	// Проверка принадлежности подсети
+	return h.cfg.TrustedSubnetNet.Contains(ip)
 }

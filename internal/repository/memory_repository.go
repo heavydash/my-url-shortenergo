@@ -489,3 +489,45 @@ func (m *MemoryRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, 
 
 	return nil
 }
+
+// Stats возвращает статистику сервиса из in-memory хранилища.
+//
+// Реализация:
+//   - Захватывает полную блокировку mu.Lock() для обеспечения consistency.
+//   - Подсчёт urls = len(m.urls) — O(1).
+//   - Подсчёт уникальных пользователей выполняется за O(N) путём прохода по всем URL
+//     и использования map[uuid.UUID]struct{}.
+//   - Записи с userID == uuid.Nil логируются как Warn, но не влияют на результат подсчёта.
+//
+// Важно:
+//   - При большом количестве URL (десятки и сотни тысяч) метод может быть относительно медленным
+//     и удерживать блокировку на всё время подсчёта.
+//   - Подходит только для разработки, тестов и небольших инстансов.
+func (m *MemoryRepository) Stats() (urls int, users int) {
+	// Захватываем блокировку
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Подсчитываем urls
+	totalURLs := len(m.urls)
+	// Создаём map для уникальных пользователей
+	uniqueUsers := make(map[uuid.UUID]struct{})
+
+	// Проходим по всем URL и собираем уникальные UserID
+	for _, url := range m.urls {
+		if url.UserID != uuid.Nil {
+			uniqueUsers[url.UserID] = struct{}{} // добавляем
+		} else {
+			// только логируем предупреждение, но продолжаем подсчёт
+			m.logger.Warn("Found URL with empty user ID", zap.String("short_url", url.ShortURL))
+
+		}
+	}
+
+	// Считаем количество уникальных пользователей
+	urls = totalURLs
+	users = len(uniqueUsers)
+
+	// Возвращаем результат
+	return
+}

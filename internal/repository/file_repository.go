@@ -510,3 +510,45 @@ func (r *FileRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, sh
 
 	return nil
 }
+
+// Stats возвращает статистику сервиса из file-based хранилища.
+//
+// Реализация:
+//   - Использует read-блокировку mu.RLock() (позволяет параллельное чтение).
+//   - Подсчёт urls = len(r.urls) — O(1).
+//   - Подсчёт уникальных пользователей выполняется за O(N) через map[uuid.UUID]struct{}.
+//   - Записи с userID == uuid.Nil логируются как Warn.
+//
+// Особенности:
+//   - Более эффективна по блокировкам, чем MemoryRepository (RLock вместо Lock).
+//   - Всё ещё линейна по количеству URL, поэтому не рекомендуется для очень больших объёмов
+//     без дополнительных оптимизаций (например, кэширования статистики).
+func (r *FileRepository) Stats() (urls int, users int) {
+	// Захватываем блокировку
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Подсчитываем urls
+	totalURLs := len(r.urls)
+
+	// Создаём map для уникальных пользователей
+	uniqueUsers := make(map[uuid.UUID]struct{})
+
+	// Проходим по всем URL и собираем уникальные UserID
+	for _, url := range r.urls {
+		if url.UserID != uuid.Nil {
+			uniqueUsers[url.UserID] = struct{}{} // добавляем
+		} else {
+			// только логируем предупреждение, но продолжаем подсчёт
+			r.logger.Warn("Found URL with empty user ID",
+				zap.String("short_url", url.ShortURL))
+		}
+	}
+
+	// Считаем количество уникальных пользователей
+	urls = totalURLs
+	users = len(uniqueUsers)
+
+	// Возвращаем результат
+	return
+}
