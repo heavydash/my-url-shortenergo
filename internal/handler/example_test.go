@@ -26,7 +26,7 @@ func ExampleHandler_ShortenPlainHandler() {
 		}
 	}()
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -71,14 +71,7 @@ func ExampleHandler_ShortenPlainHandler() {
 
 // Пример перенаправления по короткой ссылке.
 func ExampleHandler_RedirectURL() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
-
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
@@ -88,16 +81,9 @@ func ExampleHandler_RedirectURL() {
 		BaseURL:               "http://localhost:8080",
 	}
 
-	// Сервис аудита
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
-
+	noplogger := zap.NewNop()
 	// Создаем handler
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	h := handler.NewHandler(repo, cfg, noplogger, nil)
 
 	// Тестируем редирект на несуществующий URL
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
@@ -120,7 +106,7 @@ func ExampleHandler_PingHandler() {
 		}
 	}()
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация (может быть nil для тестов)
 	var cfg *config.Config // nil config допустимо
@@ -151,29 +137,20 @@ func ExampleHandler_PingHandler() {
 
 // Пример домашней страницы.
 func ExampleHandler_HomeHandler() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
 	// Конфигурация
 	cfg := &config.Config{
-		BaseURL: "http://localhost:8080",
+		BaseURL:               "http://localhost:8080",
+		DeletionQueueBuffer:   1000,
+		DeletionFlushInterval: 500 * time.Millisecond,
+		DeletionMaxBatchSize:  1000,
 	}
 
-	// Сервис аудита
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
+	nopLogger := zap.NewNop()
 
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	h := handler.NewHandler(repo, cfg, nopLogger, nil)
 
 	// Запрос на корневой путь
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -193,23 +170,18 @@ func ExampleHandler_HomeHandler() {
 
 // Пример с неправильным методом для HomeHandler.
 func ExampleHandler_HomeHandler_wrongMethod() {
-	logger, _ := zap.NewDevelopment()
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			panic(err)
-		}
-	}()
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 
-	repo := repository.NewMemoryRepository("http://localhost:8080")
-	cfg := &config.Config{}
-	auditSvc := service.New(cfg, logger)
-	defer func() {
-		if err := auditSvc.Shutdown(context.Background()); err != nil {
-			panic(err)
-		}
-	}()
+	cfg := &config.Config{
+		BaseURL:               "http://localhost:8080",
+		DeletionQueueBuffer:   1000,
+		DeletionFlushInterval: 500 * time.Millisecond,
+		DeletionMaxBatchSize:  1000,
+	}
 
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	nopLogger := zap.NewNop()
+
+	h := handler.NewHandler(repo, cfg, nopLogger, nil)
 
 	// POST запрос на корневой путь (должен вернуть 405)
 	req := httptest.NewRequest(http.MethodPost, "/", nil)

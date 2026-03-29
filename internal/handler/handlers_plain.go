@@ -93,7 +93,7 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	urlModel, err := h.repo.GetURL(id)
+	urlModel, err := h.repo.GetURL(r.Context(), id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.logger.Error("Error finding URL for ID %s: %v", zap.String("id", id), zap.Error(err))

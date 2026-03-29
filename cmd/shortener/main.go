@@ -32,20 +32,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net"
+	"net/http"
+	_ "net/http/pprof" // Подключает pprof для профилирования
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
 	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	_ "github.com/joho/godotenv/autoload" // Автоматическая загрузка .env файла
 	"go.uber.org/zap"
-	"log"
-	"net/http"
-	_ "net/http/pprof" // Подключает pprof для профилирования
-	"os"
-	"os/signal"
-	"syscall"
+	"golang.org/x/sys/unix"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
+	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
@@ -91,6 +96,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	// Создание логгера (JSON-формат, уровни info и выше)
 	logger, _ := zap.NewProduction()
@@ -126,7 +134,7 @@ func main() {
 		if err != nil {
 			// Если PostgreSQL недоступен, падаем обратно на файл/память
 			logger.Warn("postgres unavailable, falling back to file/memory", zap.Error(err))
-			repo = repository.NewMemoryRepository(cfg.BaseURL)
+			repo = repository.NewMemoryRepository(cfg.BaseURL, logger)
 		} else {
 			logger.Info("using postgres storage")
 			repo = repository.NewPostgresRepository(pool.Pool, logger, cfg.BaseURL)
@@ -134,11 +142,11 @@ func main() {
 	} else if cfg.FileStoragePath != "" {
 		// Используем файловое хранилище
 		logger.Info("using file storage", zap.String("path", cfg.FileStoragePath))
-		repo = repository.NewFileRepository(cfg.FileStoragePath, cfg.BaseURL)
+		repo = repository.NewFileRepository(cfg.FileStoragePath, cfg.BaseURL, logger)
 	} else {
 		// Используем in-memory хранилище
 		logger.Info("using in-memory storage")
-		repo = repository.NewMemoryRepository(cfg.BaseURL)
+		repo = repository.NewMemoryRepository(cfg.BaseURL, logger)
 	}
 
 	// Настройка системы аудита
@@ -161,6 +169,14 @@ func main() {
 	// Создание сервиса аудита с несколькими отправителями
 	auditSvc := service.NewAuditService(cfg, logger, auditSenders...)
 
+	// Создаём deleter
+	urlDeleter := deleter.NewURLDeleter(
+		repo,
+		logger,
+		cfg.DeletionQueueBuffer,
+		cfg.DeletionFlushInterval,
+		cfg.DeletionMaxBatchSize,
+	)
 	// Создание основного обработчика HTTP-запросов
 	h := handler.NewHandler(repo, cfg, logger, auditSvc)
 
@@ -208,12 +224,36 @@ func main() {
 		Addr:    cfg.ServerAddr, // Адрес для прослушивания
 		Handler: router}
 
-	// Запуск сервера в горутине
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal("failed to start server", zap.Error(err))
+	// Запуск сервера с явным контролем над портом и флагами
+	logger.Info("Try to start srv", zap.String("requested_addr", srv.Addr))
+
+	// Создаём низкоуровневый TCP-listener
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		logger.Fatal("failed to listen", zap.Error(err))
+	}
+
+	// Доступ к файловому дескриптору сокета
+	if tcpLn, ok := ln.(*net.TCPListener); ok {
+		file, err := tcpLn.File()
+		if err != nil {
+			logger.Error("failed to get file descriptor", zap.Error(err))
+		} else {
+			fd := file.Fd()
+			unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
+			unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			logger.Info("SO_REUSEADDR and SO_REUSEPORT enabled")
 		}
-	}()
+	}
+
+	// Логируем реальный порт, на который привязались
+	realAddr := ln.Addr().String()
+	logger.Info("Srv conn to port", zap.String("actual_addr", realAddr))
+
+	// Запускаем HTTP-сервер на этом listener
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Fatal("failed to serve", zap.Error(err))
+	}
 
 	logger.Info("server started", zap.String("addr", cfg.ServerAddr))
 
@@ -230,45 +270,79 @@ func main() {
 
 	// Graceful shutdown
 	// Ожидаем сигналы SIGINT (Ctrl+C) или SIGTERM
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 
-	logger.Info("shutting down server...")
+	go func() {
+		stop := <-quit
 
-	// Контекст с таймаутом для завершения активных запросов
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
+		logger.Info("Received signal", zap.String("signal", stop.String()))
 
-	// Останавливаем HTTP-сервер
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("server shutdown failed", zap.Error(err))
-	}
+		// Контекст с таймаутом для завершения активных запросов
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
 
-	// Закрываем удалятор ссылок (если есть активные задачи)
-	if err := h.Close(); err != nil {
-		logger.Error("deleter shutting down failed", zap.Error(err))
-	}
+		// Останавливаем HTTP-сервер
+		logger.Info("HTTP server shutting down...")
+		if err := srv.Shutdown(ctx); err != nil {
+			logger.Error("Graceful shutdown server error", zap.Error(err))
+		} else {
+			logger.Info("HTTP-server has been stopped gracefully")
+		}
 
-	// Отдельный контекст для завершения аудита
-	// Аудиту даётся больше времени на отправку всех событий
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
-	defer cancel()
+		// Даём время deleter'у завершить все задачи
+		logger.Info("Deleter has been stopped...")
 
-	if err := auditSvc.Shutdown(shutdownCtx); err != nil {
-		logger.Error("audit shutdown failed", zap.Error(err))
-	} else {
-		logger.Info("audit shutdown gracefully")
-	}
+		if urlDeleter != nil {
+			if err := urlDeleter.Close(); err != nil {
+				logger.Error("Error of deleter service", zap.Error(err))
+			} else {
+				logger.Info("Deleter has been stopped gracefully")
+			}
+		}
 
-	// Если используется PostgreSQL, закрываем соединение
-	if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
-		if err := pgRepo.Close(); err != nil {
-			logger.Error("failed to close postgres repo", zap.Error(err))
+		// Останавливаем аудит-сервис (с отдельным таймаутом, если нужно больше времени)
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
+		defer auditCancel()
+
+		logger.Info("Stop audit service...")
+		if err := auditSvc.Shutdown(auditCtx); err != nil {
+			logger.Error("Error of graceful shutdown audit service", zap.Error(err))
+		} else {
+			logger.Info("Audit service has been stopped gracefully")
+		}
+
+		// Если используется PostgreSQL, закрываем соединение
+		if pgRepo, ok := repo.(*repository.PostgresRepository); ok {
+			logger.Info("Close connection to PostgreSQL...")
+			if err := pgRepo.Close(); err != nil {
+
+				logger.Error("failed to close postgres repo", zap.Error(err))
+			}
+		}
+
+		// Безопасно закрываем логгер
+		logger.Info("Close logger...")
+		if err := zap.L().Sync(); err != nil {
+			// Игнори ошибок при быстром закрытии в терминале/тестах
+			if !errors.Is(err, syscall.ENOTTY) && // inappropriate ioctl
+				!errors.Is(err, syscall.EBADF) && // bad file descriptor
+				!strings.Contains(err.Error(), "sync /dev/stderr") {
+				logger.Error("Error sync of logger", zap.Error(err))
+			}
+		}
+
+		logger.Info("Server has been gracefully shutdown")
+	}()
+	// Запуск сервера
+	logger.Info("Server has been started", zap.String("addr", srv.Addr))
+	if err := srv.ListenAndServe(); err != nil {
+		if errors.Is(err, http.ErrServerClosed) {
+			logger.Info("Server has been stopped")
+		} else {
+			logger.Fatal("Error of starting of the server", zap.Error(err))
 		}
 	}
-	logger.Info("server stopped gracefully")
-
 }
 
 // valueOrNA возвращает переданную строку или "N/A", если строка пустая.

@@ -17,16 +17,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
-	"io"
-	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/idgen"
@@ -124,13 +125,15 @@ func NewHandler(
 //	500 Internal Server Error - ошибка генерации ID или сохранения
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
 	h.logger.Info("ShortenHandler: request started", zap.Bool("isJSON", isJSON))
+
+	h.logger.Debug("ShortenHandler: parsing request body")
 	//Парсинг запроса
 	reqURL, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
-	h.logger.Info("ShortenHandler: parsed URL", zap.String("original_url", reqURL))
+	h.logger.Debug("ShortenHandler: parsed URL", zap.String("original_url", reqURL))
 
 	//Валидация URL
 	if !h.isValidURL(reqURL) {
@@ -146,7 +149,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		util.SetSignedCookie(w, userID)
 	}
 
-	h.logger.Info("ShortenHandler: userID", zap.String("user_id", userID.String()))
+	h.logger.Debug("ShortenHandler: userID", zap.String("user_id", userID.String()))
 
 	//Генерация ID
 	id, err := idgen.IDGen()
@@ -155,7 +158,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	h.logger.Info("ShortenHandler: generated ID", zap.String("id", id))
+	h.logger.Debug("ShortenHandler: generated ID", zap.String("id", id))
 
 	//Модель
 	m := model.URLModel{
@@ -165,14 +168,14 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		UserID:      userID,
 	}
 
-	h.logger.Info("ShortenHandler: calling SaveURL",
+	h.logger.Debug("ShortenHandler: calling SaveURL",
 		zap.String("uuid", m.UUID),
 		zap.String("short_url", m.ShortURL),
 		zap.String("original_url", m.OriginalURL),
 		zap.String("user_id", userID.String()))
 
 	//Сохранение
-	saved, err := h.repo.SaveURL(m)
+	saved, err := h.repo.SaveURL(r.Context(), m)
 	if err != nil {
 		h.logger.Error("ShortenHandler: SaveURL failed", zap.Error(err))
 		if errors.Is(err, repository.ErrConflict) {

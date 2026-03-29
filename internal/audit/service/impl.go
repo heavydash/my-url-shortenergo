@@ -5,9 +5,10 @@ package service
 
 import (
 	"context"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
 	"sync"
 	"time"
+
+	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
 
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/config"

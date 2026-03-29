@@ -45,16 +45,16 @@ func NewURLDeleter(
 		flushInterval: flushInterval,
 		maxBatchSize:  maxBatchSize,
 	}
-	d.startWorker()
+	d.startWorker(ctx)
 	return d
 }
 
-func (d *URLDeleter) startWorker() {
+func (d *URLDeleter) startWorker(ctx context.Context) {
 	d.wg.Add(1)
-	go d.worker()
+	go d.worker(ctx)
 }
 
-func (d *URLDeleter) worker() {
+func (d *URLDeleter) worker(ctx context.Context) {
 	defer d.wg.Done()
 
 	d.logger.Info("deletion worker started")
@@ -79,7 +79,7 @@ func (d *URLDeleter) worker() {
 			zap.Int("total_ids", totalIDs))
 
 		for userID, ids := range batch {
-			if err := d.repo.MarkAsDeleted(userID, ids); err != nil {
+			if err := d.repo.MarkAsDeleted(ctx, userID, ids); err != nil {
 				d.logger.Error("batch delete failed", zap.Error(err), zap.String("user_id", userID.String()))
 			} else {
 				d.logger.Info("batch delete success", zap.String("user_id", userID.String()), zap.Int("count", len(ids)))
@@ -120,7 +120,7 @@ func (d *URLDeleter) worker() {
 			// Immediate flush для большого юзера
 			if d.maxBatchSize > 0 && len(batch[task.UserID]) >= d.maxBatchSize {
 				d.logger.Info("immediate flush for large batch")
-				_ = d.repo.MarkAsDeleted(task.UserID, batch[task.UserID])
+				_ = d.repo.MarkAsDeleted(ctx, task.UserID, batch[task.UserID])
 				delete(batch, task.UserID)
 			}
 

@@ -3,11 +3,12 @@ package middleware
 
 import (
 	"compress/gzip"
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // gzipResponseWriter оборачивает http.ResponseWriter для прозрачного сжатия данных.

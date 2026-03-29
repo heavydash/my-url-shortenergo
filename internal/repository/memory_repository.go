@@ -4,8 +4,10 @@ package repository
 import (
 	"context"
 	"fmt"
-	"log"
+	"github.com/avast/retry-go/v4"
+	"go.uber.org/zap"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,14 +20,16 @@ import (
 // Особенности:
 //   - Хранение данных в map[string]URLModel
 //   - Потокобезопасность через sync.Mutex
-//   - Автоматическая генерация уникальных ID
-//   - Retry логика при коллизиях ID
+//   - Автоматическая генерация уникальных ID с retry-логикой при коллизиях
+//   - Поддержка контекста для отмены операций (graceful shutdown, таймауты)
 //   - Мягкое удаление (soft delete)
+//   - Структурированное логирование через zap.Logger
 //
 // Архитектура:
 //   - Данные: map[shortID]URLModel
 //   - Синхронизация: Mutex для всех операций
-//   - Генерация ID: idgen.IDGen() с retry при коллизиях
+//   - Генерация ID: idgen.IDGen() с retry при коллизиях (библиотека avast/retry-go)
+//   - Логирование: zap.Logger для отладки и мониторинга
 //
 // Используется для:
 //   - Unit и integration тестов
@@ -41,22 +45,29 @@ type MemoryRepository struct {
 	mu      sync.Mutex
 	urls    map[string]model.URLModel
 	baseURL string
+	logger  *zap.Logger
 }
 
 // NewMemoryRepository создает новый in-memory репозиторий.
 //
-// Инициализирует пустую map для хранения URL.
+// Инициализирует пустую map для хранения URL и логгер для мониторинга.
 // Не требует внешних зависимостей (файлов, БД).
+//
+// Параметры:
+//   - baseURL: базовый URL для формирования полных коротких ссылок
+//   - logger: структурированный логгер для записи событий репозитория
 //
 // Возвращает:
 //   - *MemoryRepository: готовый к использованию репозиторий
 //
 // Пример использования:
 //
-//	repo := repository.NewMemoryRepository()
+//	logger, _ := zap.NewProduction()
+//	repo := repository.NewMemoryRepository("http://localhost:8080", logger)
+//
 //	// Используется в тестах:
 //	func TestService(t *testing.T) {
-//	    repo := repository.NewMemoryRepository()
+//	    repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 //	    svc := service.New(repo)
 //	    // тестирование...
 //	}
@@ -65,23 +76,26 @@ type MemoryRepository struct {
 //   - Данные существуют только во время работы приложения
 //   - Нет persistence между запусками
 //   - Идеален для тестов благодаря изоляции
-func NewMemoryRepository(baseURL string) *MemoryRepository {
+func NewMemoryRepository(baseURL string, logger *zap.Logger) *MemoryRepository {
 	return &MemoryRepository{
 		urls:    make(map[string]model.URLModel),
 		baseURL: baseURL,
+		logger:  logger,
 	}
 }
 
-// SaveURL сохраняет URL в memory хранилище.
+// SaveURL сохраняет URL в memory хранилище с поддержкой отмены через контекст.
 //
 // Выполняет:
 //  1. Проверку уникальности предоставленного UUID (если есть)
 //  2. Генерацию нового UUID через idgen.IDGen() если не предоставлен
-//  3. Retry логику (до 5 попыток) при коллизиях сгенерированных ID
+//  3. Retry логику с экспоненциальной задержкой при коллизиях сгенерированных ID
 //  4. Сохранение в memory map
+//  5. Структурированное логирование каждого этапа
 //
 // Параметры:
-//   - model: URLModel для сохранения (UUID может быть пустым)
+//   - ctx: контекст для отмены операции (таймаут, graceful shutdown)
+//   - urlModel: URLModel для сохранения (UUID может быть пустым)
 //
 // Возвращает:
 //   - model.URLModel: сохраненная модель с заполненными полями
@@ -89,48 +103,133 @@ func NewMemoryRepository(baseURL string) *MemoryRepository {
 //
 // Пример использования:
 //
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
 //	url := model.URLModel{
 //	    OriginalURL: "https://example.com",
 //	    UserID:      userID,
 //	}
-//	savedURL, err := repo.SaveURL(url)
+//	savedURL, err := repo.SaveURL(ctx, url)
 //	if err != nil {
-//	    // обработка ошибки (коллизия или ошибка генерации)
+//	    // обработка ошибки (коллизия, отмена контекста или ошибка генерации)
 //	}
 //
 // Логика генерации ID:
-//   - Если URLModel.UUID не пустой: проверка уникальности и сохранение
-//   - Если пустой: генерация через idgen.IDGen() с 5 попытками
-//   - При коллизии: следующая попытка с новым ID
+//   - Если urlModel.UUID не пустой: проверка уникальности и сохранение
+//   - Если пустой: генерация через idgen.IDGen() с использованием retry-пакета
+//   - При коллизии: retry с экспоненциальной задержкой
 //   - После 5 неудачных попыток: возврат ошибки
-func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error) {
+//   - При отмене контекста: немедленное прекращение попыток
+//
+// Особенности retry-логики:
+//   - Context: поддержка отмены операции
+//   - Attempts: 5 попыток генерации
+//   - DelayType: экспоненциальная задержка (BackOffDelay)
+//   - MaxDelay: максимальная задержка 150ms
+//   - LastErrorOnly: возврат только последней ошибки
+//   - OnRetry: логирование каждой неудачной попытки
+func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel) (model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return model.URLModel{}, ctx.Err()
+	}
+
+	// Защищаем map от одновременного доступа из разных горутин
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	newModel := model
-	if newModel.UUID != "" {
-		if _, ok := m.urls[newModel.UUID]; ok {
-			return model, fmt.Errorf("url with id %s already exists", newModel.UUID)
+	// UUID уже передан извне
+	if urlModel.UUID != "" {
+		// Проверяем, не занят ли уже этот идентификатор
+		if _, ok := m.urls[urlModel.UUID]; ok {
+			m.logger.Warn("Attempt to save copy UUID",
+				zap.String("uuid", urlModel.UUID),
+				zap.String("original", urlModel.OriginalURL))
+			// Коллизия — возвращаем пустую модель +  ошибку
+			return model.URLModel{}, fmt.Errorf("url with id %s already exists", urlModel.UUID)
 		}
-		m.urls[newModel.UUID] = newModel
-		return newModel, nil
+		// Всё ок — сохраняем копию модели в map
+		m.urls[urlModel.UUID] = urlModel
+		m.logger.Info("URL with unique UUID saved",
+			zap.String("uuid", urlModel.UUID),
+			zap.String("original", urlModel.OriginalURL))
+		// Возвращаем ту же копию, которую получили (она не изменилась)
+		return urlModel, nil
 	}
-	maxAttempts := 5
-	log.Printf("Attempting to save URL, current Urls size: %d", len(m.urls))
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		newID, err := idgen.IDGen()
-		if err != nil {
-			return model, fmt.Errorf("error generating uuid: %w", err)
-		}
-		currentModel := model
-		log.Printf("Attempt %d, checking ID: %s, Urls size: %d", attempt, newID, len(m.urls))
-		if _, ok := m.urls[newID]; !ok {
-			currentModel.UUID = newID
-			m.urls[newID] = currentModel
-			return currentModel, nil
-		}
+
+	var savedModel model.URLModel // сюда запишем финальную успешную модель
+
+	// retry.Do функция, которая повторяет переданное замыкание
+	// до успеха или исчерпания попыток / отмены контекста
+	err := retry.Do(
+		// Это замыкание (анонимная функция)
+		func() error {
+			// Пробуем сгенерировать короткий идентификатор
+			newID, genErr := idgen.IDGen()
+			if genErr != nil {
+				// Если генератор сломался, то это не коллизия,
+				// а фатальная ошибка, стопаем retry
+				return retry.Unrecoverable(genErr)
+			}
+			// Проверяем, свободен ли этот идентификатор в нашей map
+			if _, exist := m.urls[newID]; exist {
+				// Коллизия
+				// Возвращаем обычную ошибку. retry.Do увидит и попробует ещё раз
+				m.logger.Debug("Collision during gen short ID",
+					zap.String("generated_id", newID))
+				return fmt.Errorf("collision on generated id: %s", newID)
+			}
+			// Успех
+			// Заполняем копию модели, которую получили на входе
+			urlModel.UUID = newID
+			// Сохраняем изменённую копию в хранилище
+			m.urls[newID] = urlModel // map хранит свою копию структуры
+			// Запоминаем успешный результат для возврата
+			savedModel = urlModel // ещё одна копия, финальная версия
+
+			return nil
+		},
+
+		// Если сервер начал graceful shutdown или запрос отменён по таймауту —
+		// retry немедленно прекратит попытки и вернёт ctx.Err()
+		retry.Context(ctx),
+
+		// Максимальное количество попыток
+		retry.Attempts(5),
+		// Тип задержки между попытками
+		retry.DelayType(retry.BackOffDelay),
+		// Ограничиваем максимальную паузу
+		// Чтобы даже при 5 попытках не ждать минуты
+		retry.MaxDelay(150*time.Millisecond),
+		// Возвращаем только последнюю реальную ошибку,
+		retry.LastErrorOnly(true),
+
+		// Логируем каждую неудачную попытку
+		retry.OnRetry(func(n uint, err error) {
+			// attempt начинается с 0, поэтому +1 для человека
+			m.logger.Debug("Fail attempt to gen short ID",
+				zap.Uint("attempt", n+1),
+				zap.Error(err))
+		}),
+	)
+
+	if err != nil {
+		// Либо исчерпаны попытки, либо контекст отменён
+		m.logger.Error("Fail to gen unique short ID after attempts",
+			zap.String("original_url", urlModel.OriginalURL),
+			zap.Error(err))
+		// Возвращаем пустую модель + ошибку с обёрткой
+		return model.URLModel{}, fmt.Errorf("failed to generate unique short ID after retries: %w", err)
 	}
-	return model, fmt.Errorf("failed to generate unique short ID after %d attempts", maxAttempts)
+
+	// Успех
+	// savedModel содержит полностью заполненную модель
+	m.logger.Info("Short URL created and saved",
+		zap.String("short_id", savedModel.UUID),
+		zap.String("original_url", savedModel.OriginalURL))
+	// Возвращаем финальную версию
+	return savedModel, nil
 }
 
 // GetURL возвращает URL по его идентификатору.
@@ -142,8 +241,8 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 //   - id: shortID или UUID URL
 //
 // Возвращает:
-//   - model.URLModel: найденный URL
-//   - error: ошибка "not found" если URL не существует
+//   - *model.URLModel: указатель на найденный URL (копия для безопасности)
+//   - error: ошибка "url not found" если URL не существует
 //
 // Пример использования:
 //
@@ -151,31 +250,44 @@ func (m *MemoryRepository) SaveURL(model model.URLModel) (model.URLModel, error)
 //	if err != nil {
 //	    // URL не найден
 //	}
+//	fmt.Println(url.OriginalURL)
 //
 // Примечания:
 //   - Поиск чувствителен к регистру
 //   - Не различает shortID и UUID (используются одинаковые значения)
-//   - Операция защищена мьютексом для конкурентного доступа
-func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
+//   - Возвращает копию структуры (безопасно для конкурентного доступа)
+//   - Операция защищена мьютексом
+func (m *MemoryRepository) GetURL(ctx context.Context, id string) (*model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.urls[id]; ok {
-		return m.urls[id], nil
+
+	url, exists := m.urls[id]
+	if !exists {
+		m.logger.Debug("URL not found", zap.String("short_id", id))
+		return nil, fmt.Errorf("url not found")
 	}
-	return model.URLModel{}, fmt.Errorf("not found")
+
+	// Создаём копию и возвращаем указатель на неё — безопасно и экономно
+	copy := url
+	return &copy, nil
 }
 
 // SaveBatch сохраняет несколько URL одной атомарной операцией.
 //
 // Принимает слайс URLModel, у которых должны быть уже сгенерированы UUID.
-// Не выполняет проверку уникальности - предполагается что UUID уникальны.
+// Пропускает элементы с пустым UUID с предупреждением в логах.
 //
 // Параметры:
-//   - ctx: контекст для cancellation/timeout (не используется в текущей реализации)
+//   - ctx: контекст для cancellation/timeout
 //   - batch: слайс URLModel для сохранения
 //
 // Возвращает:
-//   - error: всегда nil в текущей реализации
+//   - error: nil если операция выполнена (даже если некоторые элементы пропущены)
 //
 // Пример использования:
 //
@@ -187,14 +299,35 @@ func (m *MemoryRepository) GetURL(id string) (model.URLModel, error) {
 //
 // Примечания:
 //   - Все URLModel должны иметь заполненное поле UUID
+//   - Элементы без UUID игнорируются с предупреждением в логах
 //   - При дубликатах UUID последний перезаписывает предыдущий
 //   - Операция атомарна благодаря единому lock
-func (m *MemoryRepository) SaveBatch(сtx context.Context, batch []model.URLModel) error {
+//   - Логирует количество сохраненных элементов
+func (m *MemoryRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	savedCount := 0
 	for _, item := range batch {
+		if item.UUID == "" {
+			m.logger.Warn("Batch element has been stole: Has no UUID",
+				zap.String("original", item.OriginalURL))
+			continue
+		}
 		m.urls[item.UUID] = item
+		savedCount++
+	}
+
+	if savedCount == 0 {
+		m.logger.Info("Batch element has been stole: Nothing to save")
+	}
+	if savedCount > 0 {
+		m.logger.Info("Batch element has been saved")
 	}
 	return nil
 }
@@ -205,25 +338,31 @@ func (m *MemoryRepository) SaveBatch(сtx context.Context, batch []model.URLMode
 // Полезно для сброса состояния между тестами.
 //
 // Возвращает:
-//   - error: всегда nil в текущей реализации
+//   - error: всегда nil
 //
 // Пример использования в тестах:
 //
 //	func TestSomething(t *testing.T) {
-//	    repo := repository.NewMemoryRepository()
-//	    defer repo.Clear() // очистка после теста
+//	    repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+//	    defer repo.Clear()
 //	    // тестовая логика...
 //	}
 //
 // Примечания:
 //   - Данные безвозвратно удаляются
 //   - Старая map становится доступной для garbage collection
-//   - Логирует новый размер хранилища (0)
+//   - Логирует количество удаленных элементов
 func (m *MemoryRepository) Clear() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	oldSize := len(m.urls)
 	m.urls = make(map[string]model.URLModel)
-	log.Printf("Cleared Urls, new size: %d", len(m.urls))
+
+	m.logger.Info("Repo has been cleared",
+		zap.Int("has elements", oldSize),
+		zap.Int("elements now", 0))
+
 	return nil
 }
 
@@ -252,7 +391,7 @@ func (m *MemoryRepository) Ping(ctx context.Context) error {
 // GetURLsByUser возвращает все URL принадлежащие указанному пользователю.
 //
 // Фильтрует URL по UserID и флагу IsDeleted, преобразует shortURL
-// в полные URL путем добавления baseURL (http://localhost:8080).
+// в полные URL путем добавления baseURL из конфигурации.
 //
 // Параметры:
 //   - ctx: контекст для cancellation/timeout
@@ -260,21 +399,26 @@ func (m *MemoryRepository) Ping(ctx context.Context) error {
 //
 // Возвращает:
 //   - []model.URLModel: слайс URL пользователя с полными shortURL
-//   - error: всегда nil в текущей реализации
+//   - error: всегда nil
 //
 // Пример использования:
 //
 //	urls, _ := repo.GetURLsByUser(context.Background(), userID)
 //	for _, url := range urls {
-//	    // url.ShortURL: "http://localhost:8080/abc123"
-//	    // url.OriginalURL: "https://example.com"
+//	    fmt.Printf("%s -> %s\n", url.ShortURL, url.OriginalURL)
 //	}
 //
 // Примечания:
 //   - Возвращает только не удаленные URL (IsDeleted = false)
 //   - Для uuid.Nil возвращает пустой слайс
-//   - Преобразование shortURL использует baseURL из конфигурации
+//   - ShortURL преобразуется в полный URL с использованием baseURL из конфигурации
+//   - Сортировка не гарантируется (порядок может меняться)
 func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -299,13 +443,14 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 //
 // Находит URL по shortID и проверяет владельца (UserID).
 // Если URL принадлежит указанному пользователю, устанавливает IsDeleted = true.
+// Повторные вызовы для уже удаленных URL игнорируются.
 //
 // Параметры:
 //   - userID: UUID пользователя для проверки владения
 //   - shortURLs: слайс short идентификаторов для пометки как удаленные
 //
 // Возвращает:
-//   - error: всегда nil в текущей реализации
+//   - error: всегда nil
 //
 // Пример использования:
 //
@@ -315,17 +460,32 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 //
 // Примечания:
 //   - Удаляет только URL принадлежащие указанному userID
-//   - Операция идемпотентна (повторные вызовы не меняют состояние)
+//   - Операция идемпотентна (повторные вызовы для удаленных URL не меняют состояние)
 //   - Не удаляет данные из map, только меняет флаг
-func (m *MemoryRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
+//   - Логирует количество фактически удаленных URL
+func (m *MemoryRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, shortURLs []string) error {
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	updated := 0
 	for _, shortURL := range shortURLs {
-		if model, ok := m.urls[shortURL]; ok && model.UserID == userID {
+		if model, ok := m.urls[shortURL]; ok && model.UserID == userID && !model.IsDeleted {
 			model.IsDeleted = true
 			m.urls[shortURL] = model
+			updated++
 		}
 	}
+	if updated > 0 {
+		m.logger.Info("URL marked as deleted",
+			zap.String("user_id", userID.String()),
+			zap.Int("modified", updated),
+			zap.Int("requested", len(shortURLs)))
+	}
+
 	return nil
 }

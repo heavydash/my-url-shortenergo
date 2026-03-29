@@ -5,8 +5,10 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -193,6 +195,12 @@ type Config struct {
 	// Примеры: "1m", "30s", "5m"
 	// Флаг: -db-health-period, env: DB_HEALTH_PERIOD, default: "1m"
 	DBHealthCheckPeriod time.Duration
+
+	EnableHTTPS bool
+
+	TLSCert string
+
+	TLSKey string
 }
 
 // NewConfig создает и загружает конфигурацию приложения.
@@ -243,6 +251,7 @@ func NewConfig() (*Config, error) {
 	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
 	d := fs.String("d", "", "DSN to store the URL")
+	//s := fs.String("s", "", "http server address") я подумал ты хочешь так сделать
 
 	// Флаги для Deleter
 	dq := fs.Int("dq", 1000, "deletion queue buffer size (default 1000)")
@@ -267,6 +276,12 @@ func NewConfig() (*Config, error) {
 	shutdownTimeoutFlag := fs.Duration("shutdown-timeout", 10*time.Second, "graceful shutdown timeout")
 	pingTimeoutFlag := fs.Duration("ping-timeout", 2*time.Second, "DB ping timeout")
 	httpClientTimeout := fs.Duration("http-client-timeout", 5*time.Second, "HTTP client timeout")
+
+	// Флаги для HTTPS
+	enableHTTPS := fs.Bool("enable-https", false, "enable HTTPS (TLS)")
+	tlsCert := fs.String("tls-cert", "server.crt", "path to TLS certificate file")
+	tlsKey := fs.String("tls-key", "server.key", "path to TLS private key file")
+
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, err
 	}
@@ -296,6 +311,10 @@ func NewConfig() (*Config, error) {
 		ShutdownTimeout:   *shutdownTimeoutFlag,
 		PingTimeout:       *pingTimeoutFlag,
 		HTTPClientTimeout: *httpClientTimeout,
+		//HTTPS
+		EnableHTTPS: *enableHTTPS,
+		TLSCert:     *tlsCert,
+		TLSKey:      *tlsKey,
 	}
 
 	overwriteFromEnv(cfg)
@@ -410,6 +429,18 @@ func overwriteFromEnv(cfg *Config) {
 			cfg.HTTPClientTimeout = dur
 		}
 	}
+
+	if val, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
+		cfg.EnableHTTPS = val == "true" || val == "1" || val == "yes"
+	}
+
+	if val, ok := os.LookupEnv("TLS_CERT"); ok {
+		cfg.TLSCert = val
+	}
+
+	if val, ok := os.LookupEnv("TLS_KEY"); ok {
+		cfg.TLSKey = val
+	}
 }
 
 // parseDuration парсит строку duration с fallback значением.
@@ -428,4 +459,43 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 		return dur
 	}
 	return fallback
+}
+
+func (c *Config) Validate() error {
+	if c.EnableHTTPS {
+		if c.TLSCert == "" {
+			return fmt.Errorf("TLS enabled but TLS cert is missing")
+		}
+		if c.TLSKey == "" {
+			return fmt.Errorf("TLS enabled but TLS key is missing")
+		}
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("Server address is missing")
+	}
+	return nil
+}
+
+func (c *Config) Normalize() {
+	if !c.EnableHTTPS {
+		return
+	}
+
+	base := strings.TrimSpace(c.BaseURL)
+	if base == "" {
+		return
+	}
+
+	lower := strings.ToLower(base)
+
+	if strings.HasPrefix(lower, "https://") {
+		return
+	}
+
+	if strings.HasPrefix(lower, "http://") {
+		c.BaseURL = "https://" + base[len("http://"):]
+		return
+	}
+
+	c.BaseURL = "https://" + base
 }

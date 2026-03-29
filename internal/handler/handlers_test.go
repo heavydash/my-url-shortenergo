@@ -50,7 +50,7 @@ func newTestHandler(
 }
 
 func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	if err := repo.Clear(); err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
@@ -203,8 +203,8 @@ func TestRedirectURLSuccess(t *testing.T) {
 
 	// Что должен получить вызов и что ответить
 	mockRepo.EXPECT().
-		GetURL("goodid").
-		Return(model.URLModel{OriginalURL: "http:/ya.ru"}, nil)
+		GetURL(gomock.Any(), "goodid").
+		Return(&model.URLModel{OriginalURL: "http:/ya.ru"}, nil)
 
 	// Запускаем хендлер с мок репозиторием
 	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"},
@@ -227,8 +227,8 @@ func TestRedirectURLNotFound(t *testing.T) {
 
 	// Что должен получить вызов и что ответить
 	mockRepo.EXPECT().
-		GetURL("goodid").
-		Return(model.URLModel{}, errors.New("not found"))
+		GetURL(gomock.Any(), "goodid").
+		Return(nil, errors.New("not found"))
 
 	// Запускаем хендлер с мок репозиторием
 	h := newTestHandler(t, mockRepo, nil, zap.NewNop())
@@ -386,7 +386,7 @@ func TestGetUserURLs_Empty(t *testing.T) {
 // Бенчмарки
 // Создание новой короткой ссылки
 func BenchmarkShorten_NewURL(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	logger := zap.NewNop()
 	auditNoop := service.Noop{}
@@ -409,7 +409,7 @@ func BenchmarkShorten_NewURL(b *testing.B) {
 
 // Повторное сокращение уже существующей ссылки
 func BenchmarkShorten_ExistingURL(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -432,7 +432,7 @@ func BenchmarkShorten_ExistingURL(b *testing.B) {
 
 // Редирект
 func BenchmarkResolve_Found(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -452,7 +452,7 @@ func BenchmarkResolve_Found(b *testing.B) {
 
 // Несуществующий короткий код
 func BenchmarkResolve_NotFound(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}
@@ -473,7 +473,7 @@ func BenchmarkResolve_NotFound(b *testing.B) {
 // Batch
 func BenchmarkBatchShorten(b *testing.B) {
 	//start
-	repo := repository.NewMemoryRepository("http://localhost:8080")
+	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
 	auditNoop := &service.Noop{}

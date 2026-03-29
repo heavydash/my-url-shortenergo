@@ -55,6 +55,7 @@ type PostgresRepository struct {
 // Параметры:
 //   - pool: настроенный пул соединений pgxpool.Pool
 //   - logger: логгер для записи операционных событий
+//   - baseURL: базовый URL для формирования полных коротких ссылок
 //
 // Возвращает:
 //   - *PostgresRepository: готовый к использованию репозиторий
@@ -88,7 +89,8 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //  3. Возврат существующей записи с ошибкой ErrConflict
 //
 // Параметры:
-//   - m: URLModel для сохранения (поле ID игнорируется, генерируется заново)
+//   - ctx: контекст для отмены операции и таймаутов
+//   - m: модель URL для сохранения (поле ID игнорируется, генерируется заново)
 //
 // Возвращает:
 //   - model.URLModel: сохраненная модель с заполненными полями ID и ShortURL
@@ -96,12 +98,15 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //
 // Пример использования:
 //
+//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+//	defer cancel()
+//
 //	url := model.URLModel{
 //	    ShortURL:    "abc123",
 //	    OriginalURL: "https://example.com",
 //	    UserID:      userID,
 //	}
-//	savedURL, err := repo.SaveURL(url)
+//	savedURL, err := repo.SaveURL(ctx, url)
 //	if errors.Is(err, repository.ErrConflict) {
 //	    // URL уже существует, используем savedURL (существующую запись)
 //	}
@@ -111,7 +116,12 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	INSERT ... ON CONFLICT (original_url) DO NOTHING
 //	- При успехе: возвращает сгенерированный ID
 //	- При конфликте: возвращает ErrNoRows, выполняется SELECT для поиска существующей записи
-func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
+func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return model.URLModel{}, ctx.Err()
+	}
+
 	query := `
 		INSERT INTO urls (id, short_url, original_url, user_id)
 		VALUES ($1, $2, $3, $4)
@@ -121,7 +131,8 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 
 	var returnedID uuid.UUID
 	var returnedShortURL string
-	err := p.pool.QueryRow(context.Background(), query,
+
+	err := p.pool.QueryRow(ctx, query,
 		uuid.New(), m.ShortURL, m.OriginalURL, m.UserID,
 	).Scan(&returnedID, &returnedShortURL)
 
@@ -129,24 +140,42 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 		// Успешно вставили
 		m.ID = returnedID
 		m.ShortURL = returnedShortURL
+
+		p.logger.Info("URL successfully saved to PostgreSQL",
+			zap.String("short_url", m.ShortURL),
+			zap.String("original_url", m.OriginalURL))
+
 		return m, nil
 	}
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Конфликт ищем существующий
 		var existing model.URLModel
-		err = p.pool.QueryRow(context.Background(),
+		err = p.pool.QueryRow(ctx,
 			`SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE original_url = $1`,
 			m.OriginalURL,
 		).Scan(&existing.ID, &existing.ShortURL, &existing.OriginalURL, &existing.UserID,
 			&existing.IsDeleted)
 
 		if err != nil {
+
+			p.logger.Error("Failed to lookup existing URL after conflict",
+				zap.String("original_url", m.OriginalURL),
+				zap.Error(err))
+
 			return model.URLModel{}, err
 		}
 
+		p.logger.Warn("URL already exists in PostgreSQL",
+			zap.String("short_url", existing.ShortURL),
+			zap.String("original_url", existing.OriginalURL))
+
 		return existing, ErrConflict
 	}
+
+	p.logger.Error("Failed to save URL to PostgreSQL",
+		zap.String("original_url", m.OriginalURL),
+		zap.Error(err))
 
 	return model.URLModel{}, err
 }
@@ -157,15 +186,16 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 // Возвращает полную модель URL включая флаг is_deleted.
 //
 // Параметры:
+//   - ctx: контекст для отмены операции и таймаутов
 //   - id: short идентификатор URL
 //
 // Возвращает:
-//   - model.URLModel: найденный URL
+//   - *model.URLModel: указатель на найденный URL (nil если не найден)
 //   - error: "url not found" если URL не существует, иначе ошибка базы данных
 //
 // Пример использования:
 //
-//	url, err := repo.GetURL("abc123")
+//	url, err := repo.GetURL(ctx, "abc123")
 //	if err != nil {
 //	    // URL не найден или ошибка БД
 //	}
@@ -177,10 +207,17 @@ func (p *PostgresRepository) SaveURL(m model.URLModel) (model.URLModel, error) {
 //   - Возвращает URL даже если is_deleted = true
 //   - Проверка is_deleted выполняется на уровне сервиса
 //   - Чувствительность к регистру зависит от collation базы данных
-func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
+func (p *PostgresRepository) GetURL(ctx context.Context, id string) (*model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	var m model.URLModel
+
 	query := `SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE short_url = $1`
-	err := p.pool.QueryRow(context.Background(), query, id).Scan(
+
+	err := p.pool.QueryRow(ctx, query, id).Scan(
 		&m.ID,
 		&m.ShortURL,
 		&m.OriginalURL,
@@ -188,12 +225,18 @@ func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 		&m.IsDeleted,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return model.URLModel{}, fmt.Errorf("url not found")
+		p.logger.Debug("URL not found in PostgreSQL", zap.String("short_id", id))
+		return nil, fmt.Errorf("url not found")
 	}
 	if err != nil {
-		return model.URLModel{}, err
+
+		p.logger.Error("Failed to get URL from PostgreSQL",
+			zap.String("short_id", id),
+			zap.Error(err))
+
+		return nil, err
 	}
-	return m, nil
+	return &m, nil
 }
 
 // SaveBatch сохраняет несколько URL в рамках одной транзакции.
@@ -214,7 +257,7 @@ func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 //	    {ShortURL: "id1", OriginalURL: "https://example1.com", UserID: userID},
 //	    {ShortURL: "id2", OriginalURL: "https://example2.com", UserID: userID},
 //	}
-//	err := repo.SaveBatch(context.Background(), urls)
+//	err := repo.SaveBatch(ctx, urls)
 //	if err != nil {
 //	    // откат транзакции выполнен автоматически
 //	}
@@ -226,8 +269,13 @@ func (p *PostgresRepository) GetURL(id string) (model.URLModel, error) {
 //   - Не проверяет уникальность (дубликаты вызовут ошибку БД)
 func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
+		p.logger.Error("Failed to begin transaction for SaveBatch", zap.Error(err))
 		return err
 	}
 	defer func() {
@@ -243,9 +291,19 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 	}
 	br := tx.SendBatch(ctx, b)
 	if err = br.Close(); err != nil {
+
+		p.logger.Error("Failed to execute batch insert in PostgreSQL", zap.Error(err))
+
 		return err
 	}
-	return tx.Commit(ctx)
+
+	if err = tx.Commit(ctx); err != nil {
+		p.logger.Error("Failed to commit batch insert", zap.Error(err))
+		return err
+	}
+
+	p.logger.Info("Batch URLs successfully saved to PostgreSQL", zap.Int("count", len(batch)))
+	return nil
 }
 
 // Ping проверяет доступность PostgreSQL базы данных.
@@ -270,7 +328,16 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 // Примечания:
 //   - Рекомендуется использовать с таймаутом 1-5 секунд
 func (p *PostgresRepository) Ping(ctx context.Context) error {
-	return p.pool.Ping(ctx)
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	err := p.pool.Ping(ctx)
+	if err != nil {
+		p.logger.Warn("PostgreSQL ping failed", zap.Error(err))
+	}
+	return err
 }
 
 // Clear полностью очищает таблицу urls.
@@ -292,7 +359,12 @@ func (p *PostgresRepository) Ping(ctx context.Context) error {
 //   - TRUNCATE быстрее чем DELETE FROM urls
 func (p *PostgresRepository) Clear() error {
 	_, err := p.pool.Exec(context.Background(), "TRUNCATE TABLE urls")
-	return err
+	if err != nil {
+		p.logger.Error("Failed to truncate urls table in PostgreSQL", zap.Error(err))
+		return err
+	}
+	p.logger.Info("URLs table successfully truncated in PostgreSQL")
+	return nil
 }
 
 // GetURLsByUser возвращает все не удаленные URL принадлежащие пользователю.
@@ -311,7 +383,7 @@ func (p *PostgresRepository) Clear() error {
 //
 // Пример использования:
 //
-//	urls, err := repo.GetURLsByUser(context.Background(), userID)
+//	urls, err := repo.GetURLsByUser(ctx, userID)
 //	for _, url := range urls {
 //	    // url.ShortURL: "http://localhost:8080/abc123"
 //	    // url.OriginalURL: "https://example.com"
@@ -322,6 +394,11 @@ func (p *PostgresRepository) Clear() error {
 //   - BaseURL берется из конфигурации и передается при создании репозитория
 //   - Возвращает только URL с is_deleted = false
 func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) ([]model.URLModel, error) {
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	if userID == uuid.Nil {
 		return []model.URLModel{}, nil
 	}
@@ -334,7 +411,12 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 `
 	rows, err := p.pool.Query(ctx, query, userID)
 	if err != nil {
-		return nil, fmt.Errorf("get urls by user: query failed: %w", err)
+
+		p.logger.Error("Failed to get user URLs from PostgreSQL",
+			zap.String("user_id", userID.String()),
+			zap.Error(err))
+
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -344,7 +426,8 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 		var u model.URLModel
 		var deleted bool
 		if err := rows.Scan(&u.ID, &u.ShortURL, &u.OriginalURL, &deleted); err != nil {
-			return nil, fmt.Errorf("get urls by user: scan failed: %w", err)
+			p.logger.Error("Failed to scan row in GetURLsByUser", zap.Error(err))
+			return nil, err
 		}
 		if !deleted {
 			u.ShortURL = fmt.Sprintf("%s/%s", p.baseURL, u.ShortURL)
@@ -354,6 +437,11 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	p.logger.Debug("Retrieved user URLs from PostgreSQL",
+		zap.String("user_id", userID.String()),
+		zap.Int("count", len(urls)))
+
 	return urls, nil
 }
 
@@ -365,6 +453,7 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 // Устанавливает is_deleted = TRUE и deleted_at = NOW().
 //
 // Параметры:
+//   - ctx: контекст для отмены операции и таймаутов
 //   - userID: UUID пользователя для проверки владения
 //   - shortURLs: слайс short идентификаторов для пометки как удаленные
 //
@@ -373,7 +462,7 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 //
 // Пример использования:
 //
-//	err := repo.MarkAsDeleted(userID, []string{"abc123", "def456"})
+//	err := repo.MarkAsDeleted(ctx, userID, []string{"abc123", "def456"})
 //	if err != nil {
 //	    // ошибка обновления БД
 //	}
@@ -383,17 +472,18 @@ func (p *PostgresRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID
 //   - Батчинг для больших списков (по 500 элементов)
 //   - Проверяет is_deleted = FALSE чтобы избежать лишних обновлений
 //   - Логирует процесс для отладки
-func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string) error {
-	p.logger.Info("repo: marking as deleted", zap.String("user_id", userID.String()), zap.Int("count", len(shortURLs)))
+func (p *PostgresRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, shortURLs []string) error {
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	if len(shortURLs) == 0 {
 		return nil
 	}
-	p.logger.Info("repo: marking as deleted",
-		zap.String("user_id", userID.String()),
-		zap.Strings("short_urls", shortURLs),
-		zap.Strings("ids", shortURLs))
 
-	const batchSize = 500 // защита от множеств параметров
+	const batchSize = 500
+
 	for i := 0; i < len(shortURLs); i += batchSize {
 		end := i + batchSize
 		if end > len(shortURLs) {
@@ -402,18 +492,34 @@ func (p *PostgresRepository) MarkAsDeleted(userID uuid.UUID, shortURLs []string)
 		batch := shortURLs[i:end]
 
 		query := `
-		UPDATE urls SET is_deleted = TRUE, deleted_at = NOW()
-        WHERE user_id = $1 AND short_url = ANY($2) AND is_deleted = FALSE`
-		_, err := p.pool.Exec(context.Background(), query, userID, pq.Array(batch))
+		UPDATE urls 
+		SET is_deleted = TRUE, deleted_at = NOW()
+        WHERE user_id = $1
+          AND short_url = ANY($2)
+          AND is_deleted = FALSE`
+
+		result, err := p.pool.Exec(ctx, query, userID, pq.Array(batch))
 		if err != nil {
-			p.logger.Error("mark as deleted failed", zap.Error(err))
-			return err
+			p.logger.Error("Failed to mark URLs as deleted in PostgreSQL",
+				zap.String("user_id", userID.String()),
+				zap.Int("batch_size", len(batch)),
+				zap.Error(err))
+			return fmt.Errorf("failed to mark batch as deleted: %w", err)
 		}
+
+		affected := result.RowsAffected()
+
+		if affected > 0 {
+			p.logger.Info("URLs marked as deleted in PostgreSQL",
+				zap.String("user_id", userID.String()),
+				zap.Int("affected", int(affected)))
+		}
+
 	}
 
-	p.logger.Info("mark as deleted successfully",
+	p.logger.Info("Completed marking URLs as deleted",
 		zap.String("user_id", userID.String()),
-		zap.Int("count", len(shortURLs)))
+		zap.Int("total_requested", len(shortURLs)))
 
 	return nil
 }
