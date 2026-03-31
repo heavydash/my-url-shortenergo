@@ -33,7 +33,7 @@ type URLRepository interface {
 	//   m   - модель URL для сохранения. Поле UUID может быть пустым для автоматической генерации
 	//
 	// Возвращает:
-	//   model.URLModel - сохраненная запись с заполненными полями UUID и ShortURL
+	//   *model.URLModel - указатель на сохранённую запись с заполненными полями UUID и ShortURL
 	//   error - ошибка если URL уже существует или возникла проблема при сохранении
 	//
 	// Пример:
@@ -41,7 +41,11 @@ type URLRepository interface {
 	//   defer cancel()
 	//   url := model.URLModel{OriginalURL: "https://example.com"}
 	//   saved, err := repo.SaveURL(ctx, url)
-	SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error)
+	//   if err != nil {
+	//       // обработка ошибки
+	//   }
+	//   fmt.Println(saved.ShortURL)
+	SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error)
 
 	// GetURL возвращает URL по его короткому идентификатору.
 	//

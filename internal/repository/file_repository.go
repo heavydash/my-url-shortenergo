@@ -143,32 +143,13 @@ func (r *FileRepository) loadFromFile() {
 //   - url: URLModel для сохранения (UUID может быть пустым)
 //
 // Возвращает:
-//   - model.URLModel: сохраненная модель с заполненными полями
+//   - *model.URLModel: указатель на сохранённую модель
 //   - error: ошибка если UUID уже существует или ошибка записи
-//
-// Пример использования:
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-//	defer cancel()
-//
-//	url := model.URLModel{
-//	    OriginalURL: "https://example.com",
-//	    UserID:      userID,
-//	}
-//	savedURL, err := repo.SaveURL(ctx, url)
-//	if err != nil {
-//	    // обработка ошибки
-//	}
-//
-// Примечания:
-//   - UUID используется и как идентификатор и как short_url
-//   - Операция атомарна благодаря режиму O_APPEND
-//   - Конкурентные вызовы защищены мьютексом
-func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model.URLModel, error) {
+func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (*model.URLModel, error) {
 	select {
 	case <-ctx.Done():
 		r.logger.Debug("SaveURL cancelled by context", zap.Error(ctx.Err()))
-		return url, ctx.Err()
+		return nil, ctx.Err()
 	default:
 	}
 
@@ -179,7 +160,7 @@ func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model
 		id, err := idgen.IDGen()
 		if err != nil {
 			r.logger.Error("failed to generate UUID for SaveURL", zap.Error(err))
-			return url, err
+			return nil, err
 		}
 		url.UUID = id
 		url.ShortURL = id
@@ -188,15 +169,15 @@ func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model
 		r.logger.Warn("attempted to save duplicate UUID",
 			zap.String("uuid", url.UUID),
 			zap.String("original_url", url.OriginalURL))
-		return url, fmt.Errorf("id already exists")
+		return nil, fmt.Errorf("id already exists")
 	}
 	if err := r.encoder.Encode(url); err != nil {
 		r.logger.Error("failed to encode URL to file", zap.Error(err))
-		return url, err
+		return nil, err
 	}
 	if _, err := r.file.Write([]byte("\n")); err != nil {
 		r.logger.Error("failed to write newline to file", zap.Error(err))
-		return url, err
+		return nil, err
 	}
 	r.urls[url.UUID] = url
 
@@ -205,7 +186,8 @@ func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (model
 		zap.String("short_url", url.ShortURL),
 		zap.String("original_url", url.OriginalURL))
 
-	return url, nil
+	saved := url
+	return &saved, nil
 }
 
 // GetURL возвращает URL по его идентификатору.
@@ -382,7 +364,7 @@ func (r *FileRepository) Ping(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		r.logger.Debug("Ping cancelled by context", zap.Error(ctx.Err()))
+		r.logger.Debug("ping cancelled by context", zap.Error(ctx.Err()))
 		return ctx.Err()
 	default:
 	}
@@ -406,7 +388,6 @@ func (r *FileRepository) Ping(ctx context.Context) error {
 //
 // Возвращает:
 //   - []model.URLModel: слайс URL пользователя
-//   - error: всегда nil в текущей реализации
 //
 // Пример использования:
 //

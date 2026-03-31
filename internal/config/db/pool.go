@@ -37,10 +37,10 @@ func New(ctx context.Context, dsn string, cfg *config.Config) (*Pool, error) {
 	}
 
 	//Pool params
-	pgxCfg.MaxConns = int32(cfg.DBMaxConns)
-	pgxCfg.MinConns = int32(cfg.DBMinConns)
-	pgxCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
-	pgxCfg.HealthCheckPeriod = cfg.DBHealthCheckPeriod
+	pgxCfg.MaxConns = int32(cfg.DB.DBMaxConns)
+	pgxCfg.MinConns = int32(cfg.DB.DBMinConns)
+	pgxCfg.MaxConnLifetime = cfg.DB.DBMaxConnLifetime
+	pgxCfg.HealthCheckPeriod = cfg.DB.DBHealthCheckPeriod
 
 	pool, err := pgxpool.NewWithConfig(ctx, pgxCfg)
 	if err != nil {

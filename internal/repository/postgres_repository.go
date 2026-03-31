@@ -94,7 +94,7 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //   - m: модель URL для сохранения (поле ID игнорируется, генерируется заново)
 //
 // Возвращает:
-//   - model.URLModel: сохраненная модель с заполненными полями ID и ShortURL
+//   - *model.URLModel: указатель на сохранённую модель
 //   - error: ErrConflict если URL уже существует, иначе ошибка базы данных
 //
 // Пример использования:
@@ -103,7 +103,6 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	defer cancel()
 //
 //	url := model.URLModel{
-//	    ShortURL:    "abc123",
 //	    OriginalURL: "https://example.com",
 //	    UserID:      userID,
 //	}
@@ -117,10 +116,10 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	INSERT ... ON CONFLICT (original_url) DO NOTHING
 //	- При успехе: возвращает сгенерированный ID
 //	- При конфликте: возвращает ErrNoRows, выполняется SELECT для поиска существующей записи
-func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
+func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error) {
 
 	if ctx.Err() != nil {
-		return model.URLModel{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	query := `
@@ -146,7 +145,8 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (mod
 			zap.String("short_url", m.ShortURL),
 			zap.String("original_url", m.OriginalURL))
 
-		return m, nil
+		saved := m // создаём копию для возврата указателя
+		return &saved, nil
 	}
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -164,21 +164,21 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (mod
 				zap.String("original_url", m.OriginalURL),
 				zap.Error(err))
 
-			return model.URLModel{}, err
+			return nil, err
 		}
 
 		p.logger.Warn("URL already exists in PostgreSQL",
 			zap.String("short_url", existing.ShortURL),
 			zap.String("original_url", existing.OriginalURL))
 
-		return existing, ErrConflict
+		return &existing, ErrConflict
 	}
 
 	p.logger.Error("Failed to save URL to PostgreSQL",
 		zap.String("original_url", m.OriginalURL),
 		zap.Error(err))
 
-	return model.URLModel{}, err
+	return nil, err
 }
 
 // GetURL возвращает URL по его short идентификатору.

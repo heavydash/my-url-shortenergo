@@ -17,6 +17,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	auditservice "github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/repository"
+	urlservice "github.com/heavydash/my-url-shortenergo/internal/service"
 	"io"
 	"net/http"
 	"net/url"
@@ -24,17 +28,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
+	"github.com/heavydash/my-url-shortenergo/internal/idgen"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
 
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"go.uber.org/zap"
-
-	"github.com/heavydash/my-url-shortenergo/internal/repository"
 )
 
 // Handler содержит зависимости для обработки HTTP запросов сервиса сокращения URL.
@@ -48,11 +49,11 @@ import (
 //	deleter  - асинхронный обработчик удаления URL
 //	auditSvc - сервис аудита для отслеживания операций
 type Handler struct {
-	repo     repository.URLRepository
+	service  urlservice.URLService
 	cfg      *config.Config
 	logger   *zap.Logger
 	deleter  *deleter.URLDeleter
-	auditSvc service.Service
+	auditSvc auditservice.Service
 }
 
 // NewHandler создает новый экземпляр HTTP обработчика со всеми зависимостями.
@@ -72,7 +73,7 @@ type Handler struct {
 //   - Автоматически создает URLDeleter с настройками из конфига или значениями по умолчанию
 //   - Если cfg nil, использует дефолтные значения: bufferSize=1000, flushInterval=500ms, maxBatchSize=1000
 func NewHandler(
-	repo repository.URLRepository,
+	service urlservice.URLService,
 	cfg *config.Config,
 	logger *zap.Logger,
 	auditSvc service.Service,
@@ -84,7 +85,7 @@ func NewHandler(
 
 	// создаем Deleter
 	del := deleter.NewURLDeleter(
-		repo,
+		service,
 		effectiveLogger,
 		cfg.DeletionQueueBuffer,
 		cfg.DeletionFlushInterval,
@@ -92,7 +93,7 @@ func NewHandler(
 	)
 
 	return &Handler{
-		repo:     repo,
+		service:  service,
 		cfg:      cfg,
 		logger:   effectiveLogger,
 		deleter:  del,
@@ -175,7 +176,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		zap.String("user_id", userID.String()))
 
 	//Сохранение
-	saved, err := h.repo.SaveURL(r.Context(), m)
+	saved, err := h.service.SaveURL(r.Context(), m)
 	if err != nil {
 		h.logger.Error("ShortenHandler: SaveURL failed", zap.Error(err))
 		if errors.Is(err, repository.ErrConflict) {

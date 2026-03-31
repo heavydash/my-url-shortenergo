@@ -15,6 +15,14 @@ import (
 	"time"
 )
 
+// DBConfig содержит настройки пула соединений с PostgreSQL.
+type DBConfig struct {
+	DBMaxConns          int           `json:"db_max_conns"`
+	DBMinConns          int           `json:"db_min_conns"`
+	DBMaxConnLifetime   time.Duration `json:"db_max_conn_lifetime"`
+	DBHealthCheckPeriod time.Duration `json:"db_health_check_period"`
+}
+
 // Config представляет полную конфигурацию URL shortener сервиса.
 //
 // Конфигурация загружается в следующем порядке приоритета:
@@ -117,87 +125,8 @@ type Config struct {
 	// Обычно чуть больше, чем обычный ShutdownTimeout
 	AuditShutdownTimeout time.Duration
 
-	// Поля для конфигурации пула соединений PostgreSQL
-	//
-	// Настройки пула влияют на производительность и потребление ресурсов:
-	// - MaxConns: лимит одновременных соединений (предотвращает перегрузку БД)
-	// - MinConns: поддержка минимального пула (снижает задержки при пиковых нагрузках)
-	// - MaxConnLifetime: ротация соединений (предотвращает утечки памяти)
-	// - HealthCheckPeriod: регулярная проверка доступности (быстрое обнаружение сбоев)
-
-	// DBMaxConns - максимальное количество соединений в пуле PostgreSQL.
-	//
-	// Ограничивает максимальное число одновременных соединений с БД.
-	// При превышении лимита запросы будут ждать освобождения соединения.
-	//
-	// Значение зависит от:
-	//   - Лимита соединений в PostgreSQL (max_connections)
-	//   - Доступной памяти на сервере
-	//   - Ожидаемой конкурентной нагрузки
-	//
-	// Рекомендации:
-	//   - Для небольших проектов: 10-20
-	//   - Для средних нагрузок: 20-50
-	//   - Для высоких нагрузок: 50-100 (с учётом лимитов БД)
-	//
-	// Флаг: -db-max-conns, env: DB_MAX_CONNS, default: 20
-	DBMaxConns int
-
-	// DBMinConns - минимальное количество соединений в пуле PostgreSQL.
-	//
-	// Поддерживает указанное число постоянных соединений, даже при отсутствии нагрузки.
-	// Снижает задержки при резких всплесках трафика, т.к. соединения уже открыты.
-	//
-	// Влияние:
-	//   - Слишком высокое значение: лишнее потребление ресурсов БД
-	//   - Слишком низкое значение: задержки при создании новых соединений
-	//
-	// Рекомендации:
-	//   - Для постоянной нагрузки: 5-10
-	//   - Для переменной нагрузки: 2-5
-	//   - Для тестов/разработки: 1-2
-	//
-	// Флаг: -db-min-conns, env: DB_MIN_CONNS, default: 5
-	DBMinConns int
-
-	// DBMaxConnLifetime - максимальное время жизни соединения с PostgreSQL.
-	//
-	// Определяет, как долго соединение может существовать до принудительного закрытия.
-	// После закрытия создаётся новое соединение для поддержания пула.
-	//
-	// Зачем нужно:
-	//   - Ротация соединений для балансировки нагрузки
-	//   - Защита от утечек памяти на стороне БД
-	//   - Обновление конфигурации сессии
-	//
-	// Рекомендации:
-	//   - Для стабильных окружений: 30-60 минут
-	//   - При частых изменениях схемы: 5-15 минут
-	//   - По умолчанию: 5 минут (хороший баланс)
-	//
-	// Формат: число с единицей измерения (ms, s, m, h)
-	// Примеры: "5m", "30m", "1h"
-	// Флаг: -db-max-lifetime, env: DB_MAX_LIFETIME, default: "5m"
-	DBMaxConnLifetime time.Duration
-
-	// DBHealthCheckPeriod - периодичность проверки здоровья соединений в пуле.
-	//
-	// Фоновый процесс регулярно проверяет доступность соединений и
-	// закрывает проблемные. Новые запросы будут использовать здоровые соединения.
-	//
-	// Влияние на производительность:
-	//   - Частые проверки: лишняя нагрузка на БД
-	//   - Редкие проверки: долгое обнаружение сбоев
-	//
-	// Рекомендации:
-	//   - Для production: 1-5 минут
-	//   - Для критичных систем: 30-60 секунд
-	//   - Для разработки: можно увеличить до 10-15 минут
-	//
-	// Формат: число с единицей измерения (ms, s, m, h)
-	// Примеры: "1m", "30s", "5m"
-	// Флаг: -db-health-period, env: DB_HEALTH_PERIOD, default: "1m"
-	DBHealthCheckPeriod time.Duration
+	// DB содержит все настройки пула соединений с PostgreSQL
+	DB DBConfig `json:"db"`
 
 	// Поля для HTTPS
 
@@ -352,10 +281,12 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 		AuditBufferSize:      4096,
 		AuditShutdownTimeout: 15 * time.Second,
 		//db
-		DBMaxConns:          20,
-		DBMinConns:          5,
-		DBMaxConnLifetime:   5 * time.Minute,
-		DBHealthCheckPeriod: 1 * time.Minute,
+		DB: DBConfig{
+			DBMaxConns:          20,
+			DBMinConns:          5,
+			DBMaxConnLifetime:   5 * time.Minute,
+			DBHealthCheckPeriod: 1 * time.Minute,
+		},
 		// Timeout
 		ServerTimeout:     5 * time.Second,
 		InitTimeout:       15 * time.Second,
@@ -456,16 +387,16 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 		cfg.AuditShutdownTimeout = *auditShutdownTimeout
 	}
 	if *dbMaxConns != defaultDBMaxConns {
-		cfg.DBMaxConns = *dbMaxConns
+		cfg.DB.DBMaxConns = *dbMaxConns
 	}
 	if *dbMinConns != defaultDBMinConns {
-		cfg.DBMinConns = *dbMinConns
+		cfg.DB.DBMinConns = *dbMinConns
 	}
 	if *dbMaxLifetime != defaultDBMaxLifetime {
-		cfg.DBMaxConnLifetime = *dbMaxLifetime
+		cfg.DB.DBMaxConnLifetime = *dbMaxLifetime
 	}
 	if *dbHealthPeriod != defaultDBHealthPeriod {
-		cfg.DBHealthCheckPeriod = *dbHealthPeriod
+		cfg.DB.DBHealthCheckPeriod = *dbHealthPeriod
 	}
 	if *serverTimeoutFlag != defaultServerTimeout {
 		cfg.ServerTimeout = *serverTimeoutFlag
@@ -552,6 +483,7 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 //	ENABLE_HTTPS             : включение HTTPS
 //	TLS_CERT                 : путь к TLS сертификату
 //	TLS_KEY                  : путь к TLS ключу
+//	TRUSTED_SUBNET           : доверенная подсеть в CIDR-нотации (например, "192.168.0.0/16")
 //
 // Примеры duration для интервалов:
 //
@@ -606,7 +538,27 @@ func overwriteFromEnv(cfg *Config) {
 			cfg.AuditShutdownTimeout = dur
 		}
 	}
-
+	//DB
+	if val, ok := os.LookupEnv("DB_MAX_CONNS"); ok {
+		if i, err := strconv.Atoi(val); err == nil && i > 0 {
+			cfg.DB.DBMaxConns = i
+		}
+	}
+	if val, ok := os.LookupEnv("DB_MIN_CONNS"); ok {
+		if i, err := strconv.Atoi(val); err == nil && i > 0 {
+			cfg.DB.DBMinConns = i
+		}
+	}
+	if val, ok := os.LookupEnv("DB_MAX_LIFETIME"); ok {
+		if dur, err := time.ParseDuration(val); err == nil && dur > 0 {
+			cfg.DB.DBMaxConnLifetime = dur
+		}
+	}
+	if val, ok := os.LookupEnv("DB_HEALTH_PERIOD"); ok {
+		if dur, err := time.ParseDuration(val); err == nil && dur > 0 {
+			cfg.DB.DBHealthCheckPeriod = dur
+		}
+	}
 	// Timeout
 	if val, ok := os.LookupEnv("SERVER_TIMEOUT"); ok {
 		if dur, err := time.ParseDuration(val); err == nil && dur > 0 {
@@ -685,7 +637,7 @@ func (c *Config) Validate(logger *zap.Logger) error {
 	}
 	if c.ServerAddr == "" {
 		logger.Error("validation failed: server address missing")
-		return fmt.Errorf("Server address is missing")
+		return fmt.Errorf("server address is missing")
 	}
 
 	if c.TrustedSubnet != "" && c.TrustedSubnetNet == nil {
@@ -820,10 +772,10 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 	}
 	// DB
 	if fileCfg.DBMaxConns != nil {
-		cfg.DBMaxConns = *fileCfg.DBMaxConns
+		cfg.DB.DBMaxConns = *fileCfg.DBMaxConns
 	}
 	if fileCfg.DBMinConns != nil {
-		cfg.DBMinConns = *fileCfg.DBMinConns
+		cfg.DB.DBMinConns = *fileCfg.DBMinConns
 	}
 	if fileCfg.DBMaxConnLifetime != "" {
 		dur, err := time.ParseDuration(fileCfg.DBMaxConnLifetime)
@@ -831,7 +783,7 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 			logger.Error("db_max_conn_lifetime invalid", zap.Error(err))
 			return err
 		}
-		cfg.DBMaxConnLifetime = dur
+		cfg.DB.DBMaxConnLifetime = dur
 	}
 	if fileCfg.DBHealthCheckInterval != "" {
 		dur, err := time.ParseDuration(fileCfg.DBHealthCheckInterval)
@@ -839,7 +791,7 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 			logger.Error("db_health_check_interval invalid", zap.Error(err))
 			return err
 		}
-		cfg.DBHealthCheckPeriod = dur
+		cfg.DB.DBHealthCheckPeriod = dur
 	}
 	// Timeout
 	if fileCfg.ServerTimeout != "" {

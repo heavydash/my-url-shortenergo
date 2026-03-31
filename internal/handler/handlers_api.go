@@ -74,7 +74,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Теперь ищем URL этого пользователя
-	urls, err := h.repo.GetURLsByUser(context.Background(), userID)
+	urls, err := h.service.GetURLsByUser(context.Background(), userID)
 	if err != nil {
 		h.logger.Error("GetURLsByUser failed", zap.Error(err))
 		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
@@ -185,7 +185,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 		respMap[item.CorrelationID] = shortURL
 	}
 	// Сохранение batch
-	if err := h.repo.SaveBatch(ctx, batchModels); err != nil {
+	if err := h.service.SaveBatch(ctx, batchModels); err != nil {
 		h.logger.Error("Failed to save batch", zap.Error(err))
 		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
 		return
@@ -303,7 +303,7 @@ func (h *Handler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Получаем статистику
-	urls, users := h.repo.Stats()
+	urls, users := h.service.Stats()
 
 	h.logger.Info("GetInternalStats: success",
 		zap.Int("urls", urls),
