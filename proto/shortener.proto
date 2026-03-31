@@ -1,0 +1,115 @@
+// Пакет shortener определяет protobuf-контракт gRPC-сервиса сокращения URL.
+//
+// Этот файл описывает публичный API, который может использоваться как внутренними
+// сервисами, так и внешними клиентами. Сервис ShortenerService работает параллельно
+// с HTTP API и использует тот же бизнес-слой (internal/service), что гарантирует
+// отсутствие расхождений в логике между протоколами.
+//
+// Все сообщения и методы спроектированы так, чтобы быть максимально совместимыми
+// с существующим HTTP API.
+//
+// # Соответствие HTTP и gRPC
+//
+//   - ShortenURL     ↔ POST /api/shorten
+//   - ExpandURL      ↔ GET /{id}
+//   - ListUserURLs   ↔ GET /api/user/urls
+//
+// # Авторизация
+//
+// Авторизация в gRPC осуществляется через unary-интерцептор AuthInterceptor.
+// Клиент должен передавать метаданные:
+//   metadata: {"authorization": "Bearer <signed-token>"}
+// или просто
+//   metadata: {"authorization": "<signed-token>"}
+//
+// При успешной проверке userID помещается в контекст и доступен в обработчиках.
+syntax = "proto3";
+
+package shortener;
+
+option go_package = "github.com/heavydash/my-url-shortenergo/proto/shortener";
+
+import "google/protobuf/empty.proto";
+
+// ShortenerService — основной gRPC-сервис для работы с короткими ссылками.
+//
+// Сервис предоставляет три метода, покрывающие основные сценарии использования:
+// создание короткой ссылки, разрешение (expand) короткой ссылки и получение
+// списка ссылок пользователя.
+service ShortenerService {
+  // ShortenURL создаёт короткую ссылку из переданного оригинального URL.
+  //
+  // Соответствует HTTP-методу POST /api/shorten.
+  // Если пользователь авторизован, ссылка привязывается к его userID.
+  //
+  // Возможные gRPC-статусы при ошибке:
+  //   - INVALID_ARGUMENT — если поле url пустое,
+  //   - INTERNAL        — при ошибке сохранения в хранилище.
+  rpc ShortenURL (URLShortenRequest) returns (URLShortenResponse);
+
+  // ExpandURL возвращает оригинальный URL по короткому идентификатору.
+  //
+  // Соответствует HTTP-методу GET /{id}.
+  // Метод не требует авторизации.
+  //
+  // Возможные gRPC-статусы при ошибке:
+  //   - INVALID_ARGUMENT — если поле id пустое,
+  //   - NOT_FOUND        — если короткая ссылка не найдена.
+  rpc ExpandURL (URLExpandRequest) returns (URLExpandResponse);
+
+  // ListUserURLs возвращает список всех коротких ссылок текущего пользователя.
+  //
+  // Соответствует HTTP-методу GET /api/user/urls.
+  // Требует авторизации. Если userID отсутствует в контексте — возвращается
+  // пустой список без ошибки.
+  //
+  // Возможные gRPC-статусы при ошибке:
+  //   - INTERNAL — при ошибке получения данных из хранилища.
+  rpc ListUserURLs (google.protobuf.Empty) returns (UserURLsResponse);
+}
+
+// URLShortenRequest — запрос на создание короткой ссылки.
+//
+// Поле url должно содержать полный валидный URL (http/https).
+message URLShortenRequest {
+  // Полный оригинальный URL, который нужно сократить.
+  // Пример: "https://www.example.com/very/long/path?param=123"
+  string url = 1;
+}
+
+// URLShortenResponse — ответ после успешного создания короткой ссылки.
+message URLShortenResponse {
+  // Полный короткий URL, готовый для использования.
+  // Пример: "http://localhost:8080/abc123"
+  string result = 1;
+}
+
+// URLExpandRequest — запрос на разрешение короткой ссылки.
+message URLExpandRequest {
+  // Короткий идентификатор ссылки (обычно 8–10 символов).
+  // Пример: "abc123"
+  string id = 1;
+}
+
+// URLExpandResponse — ответ с оригинальным URL.
+message URLExpandResponse {
+  // Оригинальный URL, на который должна происходить переадресация.
+  // Пример: "https://www.example.com/very/long/path?param=123"
+  string result = 1;
+}
+
+// UserURLsResponse — список всех ссылок пользователя.
+message UserURLsResponse {
+  // Массив коротких ссылок пользователя.
+  repeated URLData urls = 1;
+}
+
+// URLData — информация об одной короткой ссылке пользователя.
+message URLData {
+  // Короткий идентификатор (часть URL после BASE_URL).
+  // Пример: "abc123"
+  string short_url = 1;
+  // Полный оригинальный URL.
+  // Пример: "https://www.example.com/some-page"
+  string original_url = 2;
+}

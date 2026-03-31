@@ -38,6 +38,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
+	"github.com/heavydash/my-url-shortenergo/internal/grpc"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/service"
 	"github.com/heavydash/my-url-shortenergo/migrations"
@@ -188,6 +189,12 @@ func main() {
 
 	// Настройка роутера вынесена в отдельную функцию
 	router := handler.SetupRouter(h)
+
+	// gRPC запуск сервера
+	grpcServer := grpc.NewServer(urlService, cfg, logger)
+	if err := grpcServer.Start(); err != nil {
+		logger.Error("failed to start gRPC server", zap.Error(err))
+	}
 
 	// Настройка graceful shutdown с отслеживанием сигналов ОС.
 	// Поддерживаются сигналы:

@@ -123,10 +123,10 @@ func (mr *MockURLRepositoryMockRecorder) SaveBatch(ctx, batch interface{}) *gomo
 }
 
 // SaveURL mocks base method.
-func (m_2 *MockURLRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
+func (m_2 *MockURLRepository) SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error) {
 	m_2.ctrl.T.Helper()
 	ret := m_2.ctrl.Call(m_2, "SaveURL", ctx, m)
-	ret0, _ := ret[0].(model.URLModel)
+	ret0, _ := ret[0].(*model.URLModel)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -135,4 +135,19 @@ func (m_2 *MockURLRepository) SaveURL(ctx context.Context, m model.URLModel) (mo
 func (mr *MockURLRepositoryMockRecorder) SaveURL(ctx, m interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveURL", reflect.TypeOf((*MockURLRepository)(nil).SaveURL), ctx, m)
+}
+
+// Stats mocks base method.
+func (m *MockURLRepository) Stats() (int, int) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Stats")
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(int)
+	return ret0, ret1
+}
+
+// Stats indicates an expected call of Stats.
+func (mr *MockURLRepositoryMockRecorder) Stats() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stats", reflect.TypeOf((*MockURLRepository)(nil).Stats))
 }

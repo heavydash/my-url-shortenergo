@@ -28,11 +28,12 @@ func newTestPostgresRepo(t *testing.T) *PostgresRepository {
 
 	// Создаём минимальный тестовый конфиг`
 	testCfg := &config.Config{
-		PingTimeout:         5 * time.Second, // или любое разумное значение
-		DBMaxConns:          5,
-		DBMinConns:          1,
-		DBMaxConnLifetime:   5 * time.Minute,
-		DBHealthCheckPeriod: 1 * time.Minute,
+		DB: config.DBConfig{
+			DBMaxConns:          20,
+			DBMinConns:          5,
+			DBMaxConnLifetime:   5 * time.Minute,
+			DBHealthCheckPeriod: 1 * time.Minute,
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

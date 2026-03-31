@@ -1,22 +1,48 @@
-// Package middleware предоставляет middleware-компоненты для HTTP-сервера.
-// Middleware выполняют обработку запросов перед их передачей основным обработчикам.
+// Пакет middleware предоставляет компоненты промежуточной обработки HTTP-запросов
+// для сервиса сокращения URL.
+//
+// Middleware выполняют кросс-режущие задачи (cross-cutting concerns): аутентификацию,
+// логирование, восстановление после паник и т.д. перед передачей управления
+// основным обработчикам. Все middleware совместимы с chi.Router.Use().
+//
+// # Основные возможности
+//
+//   - Auth — stateless-аутентификация пользователей через signed cookie "user_id".
+//   - ParseAuthHeader — парсинг и проверка токена авторизации (используется как в HTTP, так и в gRPC).
+//   - UserIDKey — типобезопасный ключ для хранения идентификатора пользователя в контексте.
+//
+// # Пример использования
+//
+//	router := chi.NewRouter()
+//	router.Use(middleware.Auth(logger))
+//	router.Post("/api/shorten", handler.ShortenURL)
+//
+// В обработчике можно извлечь userID так:
+//
+//	userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+
 package middleware
 
 import (
 	"context"
-	"net/http"
-
+	"errors"
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"go.uber.org/zap"
+	"net/http"
 )
 
-// Ключ для контекста, приватный тип чтобы гарантировать уникальность
-// и предотвратить случайные коллизии с ключами из других пакетов.
+// ctxKey — приватный тип ключа для хранения значений в контексте.
+//
+// Используется для создания уникального ключа UserIDKey. Приватный тип
+// гарантирует, что никто извне пакета не сможет случайно использовать тот же ключ
+// и вызвать коллизию значений в контексте.
 type ctxKey string
 
-// UserIDKey - ключ для хранения идентификатора пользователя в контексте запроса.
-// Используется для извлечения userID в обработчиках после аутентификации.
+// UserIDKey — ключ для хранения идентификатора пользователя в контексте запроса.
+//
+// Значение под этим ключом имеет тип uuid.UUID. Используется после успешной
+// аутентификации в middleware.Auth и в gRPC AuthInterceptor.
 const UserIDKey ctxKey = "userID"
 
 // Auth создает middleware для аутентификации пользователей на основе cookies.
@@ -82,4 +108,26 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// ParseAuthHeader извлекает и проверяет userID из строки авторизации.
+//
+// Функция поддерживает два формата:
+//   - "Bearer <signed-token>"
+//   - просто "<signed-token>"
+//
+// Она удаляет префикс "Bearer ", проверяет подпись токена и возвращает uuid.UUID.
+// В случае любой ошибки возвращает uuid.Nil и ошибку.
+//
+// Используется:
+//   - в HTTP-обработчиках (если потребуется прямой парсинг заголовка),
+//   - в gRPC AuthInterceptor для проверки metadata "authorization".
+//
+// Логика проверки полностью делегируется util.GetUserIDFromToken.
+func ParseAuthHeader(authHeader string) (uuid.UUID, error) {
+	if authHeader == "" {
+		return uuid.Nil, errors.New("empty authorization header")
+	}
+
+	return util.GetUserIDFromToken(authHeader)
 }
