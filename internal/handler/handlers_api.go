@@ -248,6 +248,16 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, true, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+
+	// Дополнительная проверка: была ли кука изначально?
+	// Если куки не было — middleware создал нового пользователя.
+	// Для удаления это не подходит.
+	originalCookie, _ := r.Cookie("user_id")
+	if originalCookie == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
 		h.sendError(w, true, "Bad request", http.StatusBadRequest)

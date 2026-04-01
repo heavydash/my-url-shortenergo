@@ -1,3 +1,11 @@
+// Package handler содержит вспомогательные функции и общие тесты для HTTP-обработчиков.
+//
+// В этом файле оставлены только:
+//   - Вспомогательные функции (newTestHandler, setupTest и т.д.)
+//   - Gzip-тесты (входящий и исходящий)
+//   - Бенчмарки (пока не трогаем, как просил)
+//
+// Все специфические тесты API и plain хендлеров вынесены в handlers_plain_test.go/handlers_api_test.go
 package handler
 
 import (
@@ -249,129 +257,6 @@ func TestBatchShortenHandler_InvalidURL(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "invalid url")
-}
-
-// Бенчмарки
-// Создание новой короткой ссылки
-func BenchmarkShorten_NewURL(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
-	svc := URLService.NewURLService(repo)
-
-	cfg := &config.Config{BaseURL: "http://localhost:8080"}
-	logger := zap.NewNop()
-	auditNoop := &auditService.Noop{}
-
-	h := NewHandler(svc, cfg, logger, auditNoop)
-
-	body := strings.NewReader(`{"url":"https://example.com"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", body)
-	req.Header.Set("Content-Type", "text/plain")
-
-	w := httptest.NewRecorder()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Body.Reset()
-		h.ShortenHandler(w, req, false)
-	}
-}
-
-// Повторное сокращение уже существующей ссылки
-func BenchmarkShorten_ExistingURL(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
-	svc := URLService.NewURLService(repo)
-
-	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
-	logger := zap.NewNop()
-	auditNoop := &auditService.Noop{}
-
-	h := NewHandler(svc, cfg, logger, auditNoop)
-
-	body := strings.NewReader("https://example.com")
-	req := httptest.NewRequest(http.MethodPost, "/", body)
-	req.Header.Set("Content-Type", "text/plain")
-	w := httptest.NewRecorder()
-	h.ShortenHandler(w, req, false)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Body.Reset()
-		h.ShortenHandler(w, req, false)
-	}
-}
-
-// Редирект
-func BenchmarkResolve_Found(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
-	svc := URLService.NewURLService(repo)
-
-	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
-	logger := zap.NewNop()
-	auditNoop := &auditService.Noop{}
-
-	h := NewHandler(svc, cfg, logger, auditNoop)
-
-	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
-	w := httptest.NewRecorder()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Body.Reset()
-		h.RedirectURL(w, req)
-	}
-}
-
-// Несуществующий короткий код
-func BenchmarkResolve_NotFound(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
-	svc := URLService.NewURLService(repo)
-
-	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
-	logger := zap.NewNop()
-	auditNoop := &auditService.Noop{}
-
-	h := NewHandler(svc, cfg, logger, auditNoop)
-
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent123", nil)
-	w := httptest.NewRecorder()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Body.Reset()
-		h.RedirectURL(w, req)
-	}
-}
-
-// Batch
-func BenchmarkBatchShorten(b *testing.B) {
-	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
-	svc := URLService.NewURLService(repo)
-
-	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
-	logger := zap.NewNop()
-	auditNoop := &auditService.Noop{}
-
-	h := NewHandler(svc, cfg, logger, auditNoop)
-
-	body := strings.NewReader(`[
-		{"correlation_id": "1", "original_url": "https://ya.ru"},
-		{"correlation_id": "2", "original_url": "https://google.com"},
-		{"correlation_id": "3", "original_url": "https://example.com"},
-	]`)
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", body)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		w.Body.Reset()
-		h.BatchShortenHandler(w, req)
-	}
 }
 
 func getResponseBody(t *testing.T, w *httptest.ResponseRecorder) string {
