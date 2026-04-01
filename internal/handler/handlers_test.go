@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,12 +12,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	auditService "github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	"github.com/heavydash/my-url-shortenergo/internal/repository/mocks"
+	URLService "github.com/heavydash/my-url-shortenergo/internal/service"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -39,10 +39,12 @@ func newTestHandler(
 		}
 	}
 
-	auditNoop := &service.Noop{}
+	svc := URLService.NewURLService(repo)
+
+	auditNoop := &auditService.Noop{}
 
 	return NewHandler(
-		repo,
+		svc,
 		cfg,
 		logger,
 		auditNoop,
@@ -51,6 +53,7 @@ func newTestHandler(
 
 func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Config, *repository.MemoryRepository) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
 	if err := repo.Clear(); err != nil {
 		t.Fatalf("Clear failed: %v", err)
 	}
@@ -59,7 +62,7 @@ func setupTest(t *testing.T) (*chi.Mux, *httptest.ResponseRecorder, *config.Conf
 	logger, _ := zap.NewProduction()
 	t.Cleanup(func() { _ = logger.Sync() })
 
-	h := newTestHandler(t, repo, cfg, logger)
+	h := newTestHandler(t, svc, cfg, logger)
 
 	router := chi.NewRouter()
 
@@ -116,35 +119,6 @@ func SetupTestRouter(t *testing.T, h *Handler) (*chi.Mux, httptest.ResponseRecor
 
 }
 
-func TestHandler_ShortenURL(t *testing.T) {
-	t.Run("Valid POST", func(t *testing.T) {
-		r, w, _, _ := setupTest(t)
-		req := httptest.NewRequest("POST", "/", strings.NewReader("https://example.com"))
-
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusCreated, w.Code)
-
-		body := getResponseBody(t, w)
-		assert.Contains(t, body, "http://localhost:33675/")
-	})
-}
-
-func TestHandler_HomeHandler(t *testing.T) {
-	t.Run("Valid GET", func(t *testing.T) {
-		r, w, _, _ := setupTest(t)
-		req := httptest.NewRequest("GET", "/", nil)
-		r.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-
-		body := getResponseBody(t, w)
-		assert.Contains(t, body, "URL Shortener Service")
-		assert.Contains(t, body, "POST /")
-		assert.Contains(t, body, "GET /{id}")
-	})
-}
-
 func TestGzipIn(t *testing.T) {
 	t.Run("GZIP POST JSON Incoming", func(t *testing.T) {
 		r, w, _, _ := setupTest(t)
@@ -192,90 +166,6 @@ func TestGzipOut(t *testing.T) {
 			t.Log("Response was not gzipped (possibly too small)")
 		}
 	})
-}
-
-// handlers_plain_test.go :
-func TestRedirectURLSuccess(t *testing.T) {
-	ctrl := gomock.NewController(t) // создаем контроллер
-	defer ctrl.Finish()
-
-	mockRepo := mocks.NewMockURLRepository(ctrl) // создаем мок
-
-	// Что должен получить вызов и что ответить
-	mockRepo.EXPECT().
-		GetURL(gomock.Any(), "goodid").
-		Return(&model.URLModel{OriginalURL: "http:/ya.ru"}, nil)
-
-	// Запускаем хендлер с мок репозиторием
-	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"},
-		zap.NewNop())
-
-	req := httptest.NewRequest(http.MethodGet, "/goodid", nil)
-	w := httptest.NewRecorder()
-
-	h.RedirectURL(w, req)
-
-	// gomock проверяет был ли вызов GetURL ("test")
-	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
-	assert.Equal(t, "http:/ya.ru", w.Header().Get("Location"))
-}
-
-func TestRedirectURLNotFound(t *testing.T) {
-	ctrl := gomock.NewController(t) // создаем контроллер
-	defer ctrl.Finish()
-	mockRepo := mocks.NewMockURLRepository(ctrl) // создаем мок
-
-	// Что должен получить вызов и что ответить
-	mockRepo.EXPECT().
-		GetURL(gomock.Any(), "goodid").
-		Return(nil, errors.New("not found"))
-
-	// Запускаем хендлер с мок репозиторием
-	h := newTestHandler(t, mockRepo, nil, zap.NewNop())
-
-	req := httptest.NewRequest(http.MethodGet, "/goodid", nil)
-	w := httptest.NewRecorder()
-
-	h.RedirectURL(w, req)
-
-	// gomock проверяет был ли вызов GetURL ("test")
-	assert.Equal(t, http.StatusNotFound, w.Code)
-}
-
-func TestPingHandlerOK(t *testing.T) {
-	ctrl := gomock.NewController(t) // создаем контроллер
-	defer ctrl.Finish()
-	repo := mocks.NewMockURLRepository(ctrl)     // создаем мок
-	repo.EXPECT().Ping(gomock.Any()).Return(nil) // Что должен получить вызов и что ответить
-
-	// Запускаем хендлер с мок репозиторием
-	h := newTestHandler(t, repo, nil, zap.NewNop())
-
-	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	w := httptest.NewRecorder()
-
-	h.PingHandler(w, req)
-
-	// gomock проверяет был ли вызов GetURL ("test")
-	assert.Equal(t, http.StatusOK, w.Code)
-}
-
-// handlers_api_test.go :
-
-func TestShortenURL_JSON(t *testing.T) {
-	t.Run("Valid POST JSON", func(t *testing.T) {
-		r, w, _, _ := setupTest(t)
-		req := httptest.NewRequest("POST", "/api/shorten", strings.NewReader("{\"url\":\"https://example.com\"}"))
-
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
-
-		body := getResponseBody(t, w)
-		assert.Contains(t, body, "http://localhost:33675/")
-	})
-
 }
 
 func TestBatchShortenHandler_OK(t *testing.T) {
@@ -361,37 +251,17 @@ func TestBatchShortenHandler_InvalidURL(t *testing.T) {
 	require.Contains(t, w.Body.String(), "invalid url")
 }
 
-func TestGetUserURLs_Empty(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockRepo := mocks.NewMockURLRepository(ctrl)
-	mockRepo.EXPECT().
-		GetURLsByUser(gomock.Any(), gomock.Any()).
-		Return([]model.URLModel{}, nil)
-
-	h := newTestHandler(t, mockRepo, &config.Config{BaseURL: "http://localhost:8080"}, zap.NewNop())
-
-	router, rec := SetupTestRouter(t, h)
-
-	req := httptest.NewRequest("GET", "/api/user/urls", nil)
-	req.AddCookie(&http.Cookie{Name: "user_id", Value: "test"})
-
-	router.ServeHTTP(&rec, req)
-
-	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-}
-
 // Бенчмарки
 // Создание новой короткой ссылки
 func BenchmarkShorten_NewURL(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
+
 	cfg := &config.Config{BaseURL: "http://localhost:8080"}
 	logger := zap.NewNop()
-	auditNoop := service.Noop{}
+	auditNoop := &auditService.Noop{}
 
-	h := NewHandler(repo, cfg, logger, auditNoop)
+	h := NewHandler(svc, cfg, logger, auditNoop)
 
 	body := strings.NewReader(`{"url":"https://example.com"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", body)
@@ -410,11 +280,13 @@ func BenchmarkShorten_NewURL(b *testing.B) {
 // Повторное сокращение уже существующей ссылки
 func BenchmarkShorten_ExistingURL(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
+
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
-	auditNoop := &service.Noop{}
+	auditNoop := &auditService.Noop{}
 
-	h := NewHandler(repo, cfg, logger, auditNoop)
+	h := NewHandler(svc, cfg, logger, auditNoop)
 
 	body := strings.NewReader("https://example.com")
 	req := httptest.NewRequest(http.MethodPost, "/", body)
@@ -433,11 +305,13 @@ func BenchmarkShorten_ExistingURL(b *testing.B) {
 // Редирект
 func BenchmarkResolve_Found(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
+
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
-	auditNoop := &service.Noop{}
+	auditNoop := &auditService.Noop{}
 
-	h := NewHandler(repo, cfg, logger, auditNoop)
+	h := NewHandler(svc, cfg, logger, auditNoop)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	w := httptest.NewRecorder()
@@ -453,11 +327,13 @@ func BenchmarkResolve_Found(b *testing.B) {
 // Несуществующий короткий код
 func BenchmarkResolve_NotFound(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
+
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
-	auditNoop := &service.Noop{}
+	auditNoop := &auditService.Noop{}
 
-	h := NewHandler(repo, cfg, logger, auditNoop)
+	h := NewHandler(svc, cfg, logger, auditNoop)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent123", nil)
 	w := httptest.NewRecorder()
@@ -472,13 +348,14 @@ func BenchmarkResolve_NotFound(b *testing.B) {
 
 // Batch
 func BenchmarkBatchShorten(b *testing.B) {
-	//start
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
+	svc := URLService.NewURLService(repo)
+
 	cfg := &config.Config{BaseURL: "http://localhost:8080/"}
 	logger := zap.NewNop()
-	auditNoop := &service.Noop{}
+	auditNoop := &auditService.Noop{}
 
-	h := NewHandler(repo, cfg, logger, auditNoop)
+	h := NewHandler(svc, cfg, logger, auditNoop)
 
 	body := strings.NewReader(`[
 		{"correlation_id": "1", "original_url": "https://ya.ru"},

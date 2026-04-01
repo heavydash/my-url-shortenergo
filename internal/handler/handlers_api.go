@@ -73,6 +73,14 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Дополнительная проверка: Если куки изначально не было — middleware создал нового. Для /api/user/urls это не подходит.
+	originalCookie, _ := r.Cookie("user_id")
+	if originalCookie == nil {
+		// Куки не было изначально - новый пользователь
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Теперь ищем URL этого пользователя
 	urls, err := h.service.GetURLsByUser(context.Background(), userID)
 	if err != nil {
