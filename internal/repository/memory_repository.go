@@ -5,14 +5,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/avast/retry-go/v4"
+	"github.com/google/uuid"
+	"github.com/heavydash/my-url-shortenergo/internal/generator"
+	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"go.uber.org/zap"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
-
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
-	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
 // MemoryRepository реализует хранилище URL в оперативной памяти (in-memory).
@@ -28,7 +26,7 @@ import (
 // Архитектура:
 //   - Данные: map[shortID]URLModel
 //   - Синхронизация: Mutex для всех операций
-//   - Генерация ID: idgen.IDGen() с retry при коллизиях (библиотека avast/retry-go)
+//   - Генерация ID: generator.IDGen() с retry при коллизиях (библиотека avast/retry-go)
 //   - Логирование: zap.Logger для отладки и мониторинга
 //
 // Используется для:
@@ -88,7 +86,7 @@ func NewMemoryRepository(baseURL string, logger *zap.Logger) *MemoryRepository {
 //
 // Выполняет:
 //  1. Проверку уникальности предоставленного UUID (если есть)
-//  2. Генерацию нового UUID через idgen.IDGen() если не предоставлен
+//  2. Генерацию нового UUID через generator.IDGen() если не предоставлен
 //  3. Retry логику с экспоненциальной задержкой при коллизиях сгенерированных ID
 //  4. Сохранение в memory map
 //  5. Структурированное логирование каждого этапа
@@ -117,7 +115,7 @@ func NewMemoryRepository(baseURL string, logger *zap.Logger) *MemoryRepository {
 //
 // Логика генерации ID:
 //   - Если urlModel.UUID не пустой: проверка уникальности и сохранение
-//   - Если пустой: генерация через idgen.IDGen() с использованием retry-пакета
+//   - Если пустой: генерация через generator.IDGen() с использованием retry-пакета
 //   - При коллизии: retry с экспоненциальной задержкой
 //   - После 5 неудачных попыток: возврат ошибки
 //   - При отмене контекста: немедленное прекращение попыток
@@ -169,7 +167,7 @@ func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel)
 		// Это замыкание (анонимная функция)
 		func() error {
 			// Пробуем сгенерировать короткий идентификатор
-			newID, genErr := idgen.IDGen()
+			newID, genErr := generator.IDGen()
 			if genErr != nil {
 				// Если генератор сломался, то это не коллизия,
 				// а фатальная ошибка, стопаем retry

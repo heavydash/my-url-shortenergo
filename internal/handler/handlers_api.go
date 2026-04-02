@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
@@ -175,7 +175,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	respMap := make(map[string]string)
 
 	for _, item := range batch {
-		id, err := idgen.IDGen()
+		id, err := generator.IDGen()
 		if err != nil || id == "" {
 			h.logger.Error("Failed to generate ID", zap.Error(err))
 			h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)

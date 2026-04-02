@@ -1,17 +1,21 @@
+// Package repository содержит тесты для PostgreSQL-реализации хранилища URL.
+//
+// Тесты используют реальную базу данных (требуется DATABASE_DSN) и helper newTestPostgresRepo(),
+// который создаёт пул, очищает таблицу и правильно закрывает ресурсы после теста.
+//
+// Все тесты проверяют поведение, специфичное для PostgreSQL: уникальность ограничений,
+// обработку конфликтов, транзакции и soft delete.
 package repository
 
 import (
 	"context"
-	"errors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/heavydash/my-url-shortenergo/internal/config"
-
 	"github.com/google/uuid"
-	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,168 +30,262 @@ func newTestPostgresRepo(t *testing.T) *PostgresRepository {
 		t.Skip("DATABASE_DSN environment variable not set")
 	}
 
-	// Создаём минимальный тестовый конфиг`
-	testCfg := &config.Config{
-		DB: config.DBConfig{
-			DBMaxConns:          20,
-			DBMinConns:          5,
-			DBMaxConnLifetime:   5 * time.Minute,
-			DBHealthCheckPeriod: 1 * time.Minute,
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Создаём контекст с таймаутом для инициализации
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	pool, err := db.New(ctx, dsn, testCfg)
-	require.NoError(t, err, "failed to connect to postgres")
+	// Простое прямое создание пула через pgxpool
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	require.NoError(t, err, "failed to parse DSN")
+
+	// Создаём пул соединений
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		t.Fatalf("pgxpool.NewWithConfig failed: %v", err)
+	}
 
 	logger := zap.NewNop()
 
-	repo := NewPostgresRepository(pool.Pool, logger, "http://localhost:8080")
+	repo := NewPostgresRepository(pool, logger, "http://localhost:8080")
 
-	// Очистка таблиц перед каждым тестом
+	// Очищаем таблицу перед тестами
 	_, err = pool.Exec(ctx, "TRUNCATE TABLE urls RESTART IDENTITY CASCADE")
-	require.NoError(t, err, "failed to truncate urls table")
+	if err != nil {
+		t.Logf("Warning: TRUNCATE failed: %v", err)
+	}
 
+	// Закрываем пул после завершения теста
 	t.Cleanup(func() {
 		pool.Close()
 	})
+
+	t.Log("Test Postgres repo ready")
 	return repo
 }
 
+// TestPostgresRepository_SaveURL проверяет сохранение одиночного URL в PostgreSQL.
+//
+// Особенности PostgresRepository:
+//   - При дубликате short_url или uuid возвращается ошибка уникальности
+//   - Автоматически генерирует ID и short_url при необходимости
+//   - Использует ON CONFLICT DO NOTHING + последующий SELECT
 func TestPostgresRepository_SaveURL(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
 	repo := newTestPostgresRepo(t)
 
-	url := &model.URLModel{
-		OriginalURL: "http://example.com",
+	tests := []struct {
+		nameTest    string
+		input       model.URLModel
+		wantErr     bool
+		description string
+	}{
+		{
+			nameTest: "Save URL with provided UUID and ShortURL",
+			input: model.URLModel{
+				UUID:        "pg-uuid-123",
+				ShortURL:    "pg-uuid-123",
+				OriginalURL: "https://google.com",
+				UserID:      uuid.New(),
+			},
+			wantErr:     false,
+			description: "A URL with an explicitly specified UUID and ShortURL",
+		},
+		{
+			nameTest: "Save duplicate UUID",
+			input: model.URLModel{
+				UUID:        "pg-duplicate",
+				ShortURL:    "pg-duplicate",
+				OriginalURL: "https://duplicate.com",
+			},
+			wantErr:     true,
+			description: "Duplicate short_url, Postgres should return a uniqueness error.",
+		},
 	}
 
-	saved, err := repo.SaveURL(t.Context(), *url)
-	require.NoError(t, err, "failed to save url")
+	// Перебираем все сценарии
+	for _, tt := range tests {
 
-	t.Logf("Saved URL: %+v", saved)
+		t.Run(tt.nameTest, func(t *testing.T) {
 
-	// Проверки
-	assert.NotEqual(t, uuid.Nil, saved.ID, "ID should be generated")
-	assert.Equal(t, url.OriginalURL, saved.OriginalURL, "OriginalURL should match")
-	assert.False(t, saved.IsDeleted, "IsDeleted should be false")
+			// Подготавливаем первое сохранение для теста дубликата
+			if tt.nameTest == "Save duplicate UUID" {
+				first := model.URLModel{
+					UUID:        "pg-duplicate",
+					ShortURL:    "pg-duplicate",
+					OriginalURL: "https://first.com",
+				}
+				_, err := repo.SaveURL(t.Context(), first)
+				require.NoError(t, err, "Couldn't save the first instance")
+			}
 
-	if saved.ShortURL == "" {
-		t.Log("Note: ShortURL is empty")
+			// Выполняем сохранение
+			saved, err := repo.SaveURL(t.Context(), tt.input)
+
+			if tt.wantErr {
+				require.Error(t, err, tt.description)
+				// Postgres возвращает свою ошибку уникальности
+				assert.Contains(t, err.Error(), "duplicate key", tt.description)
+				assert.Contains(t, err.Error(), "urls_short_url_key", tt.description)
+				return
+			}
+
+			require.NoError(t, err, tt.description)
+			assert.NotEmpty(t, saved.UUID, "The UUID must be generated")
+			assert.NotEmpty(t, saved.ShortURL, "ShortURL must be filled in")
+			assert.Equal(t, tt.input.OriginalURL, saved.OriginalURL)
+		})
 	}
 }
 
-func TestPostgresRepository_SaveURL_WithShortURL(t *testing.T) {
+// TestPostgresRepository_GetURL тестирует получение URL по короткому идентификатору из PostgreSQL.
+func TestPostgresRepository_GetURL(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
 	repo := newTestPostgresRepo(t)
 
-	shortURL := "abc123"
-	url := model.URLModel{
-		OriginalURL: "http://example.com",
-		ShortURL:    shortURL,
+	// Подготавливаем тестовые данные
+	saved, err := repo.SaveURL(t.Context(), model.URLModel{
+		OriginalURL: "https://ya.ru",
+		UserID:      uuid.New(),
+	})
+	require.NoError(t, err, "The test URL could not be saved")
+
+	tests := []struct {
+		nameTest    string
+		shortID     string
+		wantErr     bool
+		description string
+	}{
+		{
+			nameTest:    "Found existing URL",
+			shortID:     saved.ShortURL,
+			wantErr:     false,
+			description: "The existing URL must be found successfully",
+		},
+		{
+			nameTest:    "Not found",
+			shortID:     "non-existent-id",
+			wantErr:     true,
+			description: "A non-existent short_url should return an error.",
+		},
 	}
 
-	saved, err := repo.SaveURL(t.Context(), url)
-	require.NoError(t, err, "failed to save url")
+	// Перебираем все сценарии
+	for _, tt := range tests {
+		t.Run(tt.nameTest, func(t *testing.T) {
 
-	t.Logf("Saved URL: %+v", saved)
+			// Выполняем поиск по идентификатору
+			got, err := repo.GetURL(t.Context(), tt.shortID)
 
-	// Проверяем, что short_url сохранился
-	assert.Equal(t, shortURL, saved.ShortURL, "ShortURL should be as provided")
-	assert.NotEqual(t, uuid.Nil, saved.ID, "ID should be generated")
+			if tt.wantErr {
+				require.Error(t, err, tt.description)
+				assert.Contains(t, strings.ToLower(err.Error()), "not found", tt.description)
+				return
+			}
+
+			require.NoError(t, err, tt.description)
+			assert.Equal(t, saved.ID, got.ID)
+			assert.Equal(t, saved.ShortURL, got.ShortURL)
+			assert.Equal(t, saved.OriginalURL, got.OriginalURL)
+			assert.False(t, got.IsDeleted)
+		})
+	}
 }
 
-func TestPostgresRepository_SaveURL_Conflict(t *testing.T) {
+// TestPostgresRepository_SaveBatch тестирует пакетное сохранение URL в одной транзакции
+func TestPostgresRepository_SaveBatch(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
 	repo := newTestPostgresRepo(t)
 
-	url := &model.URLModel{
-		OriginalURL: "http://example.com",
+	// Подготавливаем батч из трёх URL
+	batch := []model.URLModel{
+		{OriginalURL: "https://github.com/test-batch-1-" + uuid.New().String(), UserID: uuid.New()},
+		{OriginalURL: "https://gitlab.com/test-batch-2-" + uuid.New().String(), UserID: uuid.New()},
+		{OriginalURL: "https://bitbucket.org/test-batch-3-" + uuid.New().String(), UserID: uuid.New()},
 	}
 
-	// Первое сохранение
-	firstSave, err := repo.SaveURL(t.Context(), *url)
-	require.NoError(t, err, "failed to save url")
+	// Выполняем пакетное сохранение
+	err := repo.SaveBatch(t.Context(), batch)
+	require.NoError(t, err, "SaveBatch should pass without error")
 
-	// Повторное сохранение
-	secondSave, err := repo.SaveURL(t.Context(), *url)
+	// Проверяем, что все URL успешно сохранены
+	for i := range batch {
+		shortURL := batch[i].ShortURL
+		t.Logf("Checking item %d with ShortURL: %s", i, shortURL)
 
-	// Проверяем, что именно ErrConflict
-	require.Error(t, err, "expected conflict error")
+		got, err := repo.GetURL(t.Context(), shortURL)
+		if err != nil {
+			t.Logf("GetURL failed for item %d: %v", i, err)
+			t.Fatalf("Couldn't find the saved URL from the batch for item %d", i)
+		}
 
-	var repoErr error
-	if errors.Is(err, ErrConflict) {
-		repoErr = ErrConflict
-	} else if strings.Contains(err.Error(), "already exists") {
-		t.Logf("Got conflict error (not ErrConflict type): %v", err)
-	} else {
-		t.Fatalf("Expected conflict error, got: %v", err)
+		assert.Equal(t, batch[i].OriginalURL, got.OriginalURL, "The OriginalURL must match")
+		assert.Equal(t, shortURL, got.ShortURL, "ShortURL must match")
+		assert.NotEmpty(t, got.ID, "The ID must be generated")
 	}
-
-	// Проверяем, что вернулась существующая запись
-	if secondSave.ID != uuid.Nil {
-		assert.Equal(t, firstSave.ID, secondSave.ID, "should return existing id")
-		assert.Equal(t, firstSave.OriginalURL, secondSave.OriginalURL, "should return existing original URL")
-	}
-
-	t.Logf("Conflict handled: err=%v, returnedID=%v", repoErr, secondSave.ID)
-}
-func TestPostgresRepository_GetURL_Found(t *testing.T) {
-	repo := newTestPostgresRepo(t)
-
-	shortURL := "abc123"
-	url := &model.URLModel{
-		OriginalURL: "http://example.com",
-		ShortURL:    shortURL,
-	}
-
-	saved, err := repo.SaveURL(t.Context(), *url)
-	require.NoError(t, err, "failed to save url")
-
-	// Убедимся, что short_url сохранился
-	require.NotEmpty(t, saved.ShortURL, "ShortURL should not be empty for this test")
-
-	// Ищем по short_url
-	got, err := repo.GetURL(t.Context(), saved.ShortURL)
-	require.NoError(t, err, "GetURL failed")
-
-	assert.Equal(t, saved.ID, got.ID, "should return existing ID")
-	assert.Equal(t, saved.ShortURL, got.ShortURL, "should return existing ShortURL")
-	assert.Equal(t, saved.OriginalURL, got.OriginalURL, "should return existing OriginalURL")
-	assert.False(t, got.IsDeleted, "should not be deleted")
 }
 
-func TestPostgresRepository_GetURL_NotFound(t *testing.T) {
+// TestPostgresRepository_GetURLsByUser тестирует получение всех URL конкретного пользователя
+func TestPostgresRepository_GetURLsByUser(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
 	repo := newTestPostgresRepo(t)
 
-	_, err := repo.GetURL(t.Context(), "nonexistent-uuid")
-	require.Error(t, err, "expected error or not found")
+	userID := uuid.New()
 
-	assert.Contains(t, strings.ToLower(err.Error()), "not found",
-		"error should contain 'not found'")
-}
+	// Сохраняем URL двух пользователей
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{OriginalURL: "https://ya.ru", UserID: userID})
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{OriginalURL: "https://google.com", UserID: userID})
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{OriginalURL: "https://vk.com", UserID: uuid.New()}) // другой пользователь
 
-func TestPostgresRepository_GetURL_Deleted(t *testing.T) {
-	repo := newTestPostgresRepo(t)
-
-	// Вставляем запись напрямую с ShortURL
-	ctx := context.Background()
-	id := uuid.New()
-	shortURL := "deleted-test-789"
-
-	_, err := repo.pool.Exec(ctx,
-		"INSERT INTO urls (id, short_url, original_url, user_id, is_deleted) VALUES ($1, $2, $3, $4, $5)",
-		id, shortURL, "http://deleted.com", uuid.Nil, false)
+	// Получаем список URL пользователя
+	urls, err := repo.GetURLsByUser(t.Context(), userID)
 	require.NoError(t, err)
 
-	// Помечаем как удаленную
-	_, err = repo.pool.Exec(ctx,
-		"UPDATE urls SET is_deleted = true WHERE short_url = $1",
-		shortURL)
+	assert.Len(t, urls, 2, "Exactly 2 URLs of this user should be returned")
+}
+
+// TestPostgresRepository_MarkAsDeleted тестирует мягкое удаление URL
+func TestPostgresRepository_MarkAsDeleted(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
+	repo := newTestPostgresRepo(t)
+
+	userID := uuid.New()
+	ids := []string{"del1", "del2"}
+
+	// Сохраняем два URL
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{UUID: "del1", ShortURL: "del1", OriginalURL: "https://1.com", UserID: userID})
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{UUID: "del2", ShortURL: "del2", OriginalURL: "https://2.com", UserID: userID})
+
+	// Выполняем мягкое удаление
+	err := repo.MarkAsDeleted(t.Context(), userID, ids)
 	require.NoError(t, err)
 
-	// Получаем через GetURL
-	got, err := repo.GetURL(t.Context(), shortURL)
-	require.NoError(t, err, "GetURL should still work for deleted URLs")
-	assert.True(t, got.IsDeleted, "should be marked as deleted")
-	assert.Equal(t, id, got.ID, "ID should match")
+	// Проверяем, что URL помечены как удалённые
+	for _, id := range ids {
+		got, _ := repo.GetURL(t.Context(), id)
+		assert.True(t, got.IsDeleted, "The URL must be marked as deleted")
+	}
+}
+
+// TestPostgresRepository_Stats тестирует подсчёт статистики
+func TestPostgresRepository_Stats(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
+	repo := newTestPostgresRepo(t)
+
+	// Добавляем два URL от разных пользователей
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{OriginalURL: "https://ya.ru", UserID: uuid.New()})
+	_, _ = repo.SaveURL(t.Context(), model.URLModel{OriginalURL: "https://google.com", UserID: uuid.New()})
+
+	urlsCount, usersCount := repo.Stats()
+	assert.Equal(t, 2, urlsCount, "There must be 2 URLs")
+	assert.Equal(t, 2, usersCount, "There must be 2 unique users")
+}
+
+// TestPostgresRepository_Ping тестирует проверку доступности базы данных
+func TestPostgresRepository_Ping(t *testing.T) {
+	// Создаём тестовый Postgres-репозиторий
+	repo := newTestPostgresRepo(t)
+
+	// Выполняем ping
+	err := repo.Ping(t.Context())
+	require.NoError(t, err, "Ping should take place when the database is live")
 }

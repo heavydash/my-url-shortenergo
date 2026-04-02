@@ -30,7 +30,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/util"
@@ -144,7 +144,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	h.logger.Debug("ShortenHandler: userID", zap.String("user_id", userID.String()))
 
 	// Генерация короткого ID
-	id, err := idgen.IDGen()
+	id, err := generator.IDGen()
 	if err != nil || id == "" {
 		h.logger.Error("Failed to generate ID", zap.Error(err))
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)

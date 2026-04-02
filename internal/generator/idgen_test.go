@@ -1,4 +1,4 @@
-package idgen
+package generator
 
 import (
 	"testing"

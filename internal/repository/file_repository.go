@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 )
 
@@ -157,7 +157,7 @@ func (r *FileRepository) SaveURL(ctx context.Context, url model.URLModel) (*mode
 	defer r.mu.Unlock()
 
 	if url.UUID == "" {
-		id, err := idgen.IDGen()
+		id, err := generator.IDGen()
 		if err != nil {
 			r.logger.Error("failed to generate UUID for SaveURL", zap.Error(err))
 			return nil, err
