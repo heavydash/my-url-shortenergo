@@ -43,7 +43,7 @@ type ctxKey string
 //
 // Значение под этим ключом имеет тип uuid.UUID. Используется после успешной
 // аутентификации в middleware.Auth и в gRPC AuthInterceptor.
-const UserIDKey ctxKey = "userID"
+const userIDKey ctxKey = "userID"
 
 // Auth создает middleware для аутентификации пользователей на основе cookies.
 //
@@ -68,7 +68,7 @@ const UserIDKey ctxKey = "userID"
 // Пример извлечения userID в обработчике:
 //
 //	func SomeHandler(w http.ResponseWriter, r *http.Request) {
-//	    userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+//	    userID := r.Context().Value(middleware.userIDKey).(uuid.UUID)
 //	    // ... использование userID
 //	}
 //
@@ -104,10 +104,30 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 				}
 			}
 
-			ctx := context.WithValue(r.Context(), UserIDKey, userID)
+			ctx := context.WithValue(r.Context(), userIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// GetUserID извлекает userID из контекста.
+// Возвращает uuid.Nil, если userID отсутствует или имеет неверный тип.
+// Это предпочтительный способ получения userID как в HTTP-хендлерах, так и в gRPC.
+func GetUserID(ctx context.Context) uuid.UUID {
+	if ctx == nil {
+		return uuid.Nil
+	}
+
+	val := ctx.Value(userIDKey)
+	if val == nil {
+		return uuid.Nil
+	}
+
+	userID, ok := val.(uuid.UUID)
+	if !ok {
+		return uuid.Nil
+	}
+	return userID
 }
 
 // ParseAuthHeader извлекает и проверяет userID из строки авторизации.
@@ -130,4 +150,13 @@ func ParseAuthHeader(authHeader string) (uuid.UUID, error) {
 	}
 
 	return util.GetUserIDFromToken(authHeader)
+}
+
+// SetUserIDToContext помещает userID в контекст под правильным (неэкспортируемым) ключом.
+// Используется из других пакетов (например, gRPC), где нельзя напрямую обращаться к userIDKey.
+func SetUserIDToContext(ctx context.Context, userID uuid.UUID) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, userIDKey, userID)
 }

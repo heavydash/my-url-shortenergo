@@ -79,13 +79,12 @@ func TestAuth(t *testing.T) {
 
 			// Создаём тестовый handler, который проверяет наличие userID в контексте
 			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Проверяем, что userID сохранён в контексте
-				userIDVal := r.Context().Value(UserIDKey)
-				assert.NotNil(t, userIDVal, "The userID must be in the context of")
+				// Проверяем, что userID сохранён в контексте при поиощи геттера
+				userID := GetUserID(r.Context())
 
-				userID, ok := userIDVal.(uuid.UUID)
-				assert.True(t, ok, "The userID must be of type uuid.UUID")
-				assert.NotEqual(t, uuid.Nil, userID, "The userID must not be Nil")
+				assert.NotEqual(t, uuid.Nil, userID, "userID must not be Nil after Auth middleware")
+
+				assert.IsType(t, uuid.UUID{}, userID, "userID must be of type uuid.UUID")
 
 				w.WriteHeader(http.StatusOK)
 			})
@@ -155,8 +154,8 @@ func TestAuth_ValidCookie(t *testing.T) {
 	authMiddleware := Auth(logger)
 
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctxUserID := r.Context().Value(UserIDKey).(uuid.UUID)
-		assert.Equal(t, userID, ctxUserID, "The userID in the context must match the cookie")
+		userIDFromContext := GetUserID(r.Context())
+		assert.Equal(t, userID, userIDFromContext, "The userID in the context must match the cookie")
 		w.WriteHeader(http.StatusOK)
 	})
 

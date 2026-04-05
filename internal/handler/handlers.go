@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	auditservice "github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	urlservice "github.com/heavydash/my-url-shortenergo/internal/service"
@@ -33,8 +32,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"github.com/heavydash/my-url-shortenergo/internal/util"
-
 	"go.uber.org/zap"
 )
 
@@ -69,7 +66,7 @@ func NewHandler(
 	service urlservice.URLService,
 	cfg *config.Config,
 	logger *zap.Logger,
-	auditSvc service.Service,
+	auditSvc auditservice.Service,
 ) *Handler {
 	effectiveLogger := logger
 	if effectiveLogger == nil {
@@ -133,12 +130,11 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		return
 	}
 
-	// Получаем userID или создаём userID
-	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
-
-	if !ok || userID == uuid.Nil {
-		userID = uuid.New()
-		util.SetSignedCookie(w, userID)
+	// Получаем userID из геттера
+	userID := middleware.GetUserID(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
 	}
 
 	h.logger.Debug("ShortenHandler: userID", zap.String("user_id", userID.String()))

@@ -22,11 +22,11 @@ import (
 	"testing"
 )
 
-// BenchmarkShorten_NewURL измеряет производительность создания новой короткой ссылки.
+// BenchmarkShortenNewURL измеряет производительность создания новой короткой ссылки.
 //
 // Сценарий: каждый вызов бенчмарка создаёт новую ссылку через JSON-эндпоинт.
 // Используется для оценки overhead генерации ID, сохранения в память и формирования ответа.
-func BenchmarkShorten_NewURL(b *testing.B) {
+func BenchmarkShortenNewURL(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	svc := URLService.NewURLService(repo)
 
@@ -44,17 +44,17 @@ func BenchmarkShorten_NewURL(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w.Body.Reset()
 		h.ShortenHandler(w, req, false)
 	}
 }
 
-// BenchmarkShorten_ExistingURL измеряет производительность повторного сокращения уже существующей ссылки.
+// BenchmarkShortenExistingURL измеряет производительность повторного сокращения уже существующей ссылки.
 //
 // Сценарий: сначала создаётся ссылка, затем многократно вызывается сокращение той же ссылки.
 // Позволяет оценить путь "URL уже существует" (конфликт + возврат существующего короткого URL).
-func BenchmarkShorten_ExistingURL(b *testing.B) {
+func BenchmarkShortenExistingURL(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	svc := URLService.NewURLService(repo)
 
@@ -72,16 +72,16 @@ func BenchmarkShorten_ExistingURL(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w.Body.Reset()
 		h.ShortenHandler(w, req, false)
 	}
 }
 
-// BenchmarkResolve_Found измеряет производительность редиректа по существующему короткому URL.
+// BenchmarkResolveFound измеряет производительность редиректа по существующему короткому URL.
 //
 // Сценарий: быстрый путь — URL найден в хранилище, возвращается 307 Temporary Redirect.
-func BenchmarkResolve_Found(b *testing.B) {
+func BenchmarkResolveFound(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	svc := URLService.NewURLService(repo)
 
@@ -96,17 +96,17 @@ func BenchmarkResolve_Found(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w.Body.Reset()
 		h.RedirectURL(w, req)
 	}
 }
 
-// BenchmarkResolve_NotFound измеряет производительность редиректа по несуществующему короткому URL.
+// BenchmarkResolveNotFound измеряет производительность редиректа по несуществующему короткому URL.
 //
 // Сценарий: URL не найден → возвращается 404 Not Found.
 // Позволяет оценить overhead поиска отсутствующей записи.
-func BenchmarkResolve_NotFound(b *testing.B) {
+func BenchmarkResolveNotFound(b *testing.B) {
 	repo := repository.NewMemoryRepository("http://localhost:8080", zap.NewNop())
 	svc := URLService.NewURLService(repo)
 
@@ -121,7 +121,7 @@ func BenchmarkResolve_NotFound(b *testing.B) {
 
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w.Body.Reset()
 		h.RedirectURL(w, req)
 	}

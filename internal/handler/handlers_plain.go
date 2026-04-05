@@ -111,8 +111,9 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Добавляем аудит
+	userID := middleware.GetUserID(r.Context())
 	userIDstr := ""
-	if userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID); ok && userID != uuid.Nil {
+	if userID != uuid.Nil {
 		userIDstr = userID.String()
 	}
 	h.auditSvc.SendAsync(audit.NewFollowEvent(userIDstr, urlModel.OriginalURL))

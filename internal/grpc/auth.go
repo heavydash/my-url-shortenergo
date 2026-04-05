@@ -50,8 +50,8 @@ func AuthInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 			return nil, status.Error(codes.Unauthenticated, "invalid authorization")
 		}
 
-		// Кладём userID в контекст (точно так же, как в HTTP)
-		ctx = context.WithValue(ctx, middleware.UserIDKey, userID)
+		// Кладём userID в контекст через экспортируемую функцию
+		ctx = middleware.SetUserIDToContext(ctx, userID)
 
 		// Продолжаем обработку
 		return handler(ctx, req)

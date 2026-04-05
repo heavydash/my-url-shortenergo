@@ -13,7 +13,6 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"go.uber.org/zap"
 )
 
@@ -59,6 +58,16 @@ func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 // Если у пользователя нет URL, возвращает 204 No Content.
 // Требует аутентификации через middleware.Auth.
 //
+// UserIDKey больше не экспортируется.
+// Используйте функцию GetUserID(ctx) вместо прямого доступа к ключу.
+//
+// Пример извлечения userID в обработчике:
+//
+//	func SomeHandler(w http.ResponseWriter, r *http.Request) {
+//	    userID := middleware.GetUserID(r.Context())
+//	    // ...
+//	}
+//
 // Коды ответа:
 //
 //	200 OK - успешно возвращены URL пользователя
@@ -66,10 +75,10 @@ func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 //	401 Unauthorized - отсутствует или невалидный user_id в cookies
 //	500 Internal Server Error - ошибка при получении данных
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
-	// Достаём из контекста
-	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// Достаём из контекста при помощи геттера
+	userID := middleware.GetUserID(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
@@ -77,7 +86,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	originalCookie, _ := r.Cookie("user_id")
 	if originalCookie == nil {
 		// Куки не было изначально - новый пользователь
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
@@ -85,7 +94,7 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	urls, err := h.service.GetURLsByUser(context.Background(), userID)
 	if err != nil {
 		h.logger.Error("GetURLsByUser failed", zap.Error(err))
-		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+		h.sendError(w, true, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -130,42 +139,44 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 //	400 Bad Request - невалидный JSON, дубликаты correlation_id, пустой batch
 //	500 Internal Server Error - ошибка при сохранении
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 
-	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		userID = uuid.New()
-		util.SetSignedCookie(w, userID)
+	// Достаем UserID при помощи геттера
+	userID := middleware.GetUserID(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
 	}
 
+	ctx := r.Context()
+
 	if r.Method != http.MethodPost {
-		h.sendError(w, true, "method not allowed", http.StatusMethodNotAllowed)
+		h.sendError(w, true, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
 	var batch []model.BatchRequestItem
 	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 		h.logger.Error("json decode failed", zap.Error(err))
-		h.sendError(w, true, "invalid json", http.StatusBadRequest)
+		h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	if len(batch) == 0 {
-		h.sendError(w, true, "empty batch", http.StatusBadRequest)
+		h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	// Дублирование correlation_id
 	seen := make(map[string]bool)
 	for _, item := range batch {
 		if seen[item.CorrelationID] {
-			h.sendError(w, true, "duplicate correlation_id", http.StatusBadRequest)
+			h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 		seen[item.CorrelationID] = true
 		if item.CorrelationID == "" {
-			h.sendError(w, true, "empty original_url", http.StatusBadRequest)
+			h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 		if !strings.HasPrefix(item.OriginalURL, "http://") && !strings.HasPrefix(item.OriginalURL, "https://") {
-			h.sendError(w, true, "invalid url scheme", http.StatusBadRequest)
+			h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 	}
@@ -178,7 +189,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 		id, err := generator.IDGen()
 		if err != nil || id == "" {
 			h.logger.Error("Failed to generate ID", zap.Error(err))
-			h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+			h.sendError(w, true, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
@@ -195,7 +206,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	// Сохранение batch
 	if err := h.service.SaveBatch(ctx, batchModels); err != nil {
 		h.logger.Error("Failed to save batch", zap.Error(err))
-		h.sendError(w, true, "Internal Server Error", http.StatusInternalServerError)
+		h.sendError(w, true, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -242,10 +253,10 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 //	400 Bad Request - невалидный JSON
 //	401 Unauthorized - отсутствует или невалидный user_id в cookies
 func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
-
-	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		h.sendError(w, true, "Unauthorized", http.StatusUnauthorized)
+	// Достаем UserID при помощи геттера
+	userID := middleware.GetUserID(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
@@ -254,13 +265,13 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 	// Для удаления это не подходит.
 	originalCookie, _ := r.Cookie("user_id")
 	if originalCookie == nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
 
 	var ids []string
 	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-		h.sendError(w, true, "Bad request", http.StatusBadRequest)
+		h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	h.logger.Info("DeleteUrls: received request", zap.Int("raw_ids_count", len(ids)))
@@ -315,7 +326,7 @@ func (h *Handler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
 			zap.String("remote_addr", r.RemoteAddr),
 			zap.String("x_real_ip", r.Header.Get("X-Real-IP")))
 
-		h.sendError(w, true, "Forbidden", http.StatusForbidden)
+		h.sendError(w, true, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
 
 	}

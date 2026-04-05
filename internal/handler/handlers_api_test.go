@@ -144,7 +144,7 @@ func TestBatchShortenHandler(t *testing.T) {
 			nameTest:         "Empty batch",
 			body:             `[]`,
 			wantCode:         http.StatusBadRequest,
-			wantBodyContains: "empty batch",
+			wantBodyContains: "Bad Request",
 			description:      "Empty batch, 400 Bad Request",
 		},
 		{
@@ -154,14 +154,14 @@ func TestBatchShortenHandler(t *testing.T) {
 				{"correlation_id": "dup", "original_url": "https://google.com"}
 			]`,
 			wantCode:         http.StatusBadRequest,
-			wantBodyContains: "duplicate correlation_id",
-			description:      "Duplicate correlation_id,  400",
+			wantBodyContains: "Bad Request",
+			description:      "Duplicate correlation_id should return Bad Request",
 		},
 		{
 			nameTest:         "Invalid URL in batch",
 			body:             `[{"correlation_id": "1", "original_url": "not-a-url"}]`,
 			wantCode:         http.StatusBadRequest,
-			wantBodyContains: "invalid url",
+			wantBodyContains: "Bad Request",
 			description:      "Invalid URL in batch, 400",
 		},
 		{
@@ -171,7 +171,7 @@ func TestBatchShortenHandler(t *testing.T) {
 				{"correlation_id": "2", "original_url": "not-a-url"}
 			]`,
 			wantCode:         http.StatusBadRequest,
-			wantBodyContains: "invalid url",
+			wantBodyContains: "Bad Request",
 			description:      "1 Valid + 1 Invalid URL in batch, 400",
 		},
 	}

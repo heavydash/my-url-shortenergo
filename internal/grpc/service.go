@@ -2,17 +2,17 @@ package grpc
 
 import (
 	"context"
-	"fmt"
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/service"
 	"github.com/heavydash/my-url-shortenergo/proto"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"strings"
+	"net/url"
 )
 
 // shortenerServer реализует protobuf-интерфейс ShortenerServiceServer.
@@ -23,17 +23,20 @@ import (
 type shortenerServer struct {
 	shortener.UnimplementedShortenerServiceServer
 
-	cfg *config.Config
-	svc service.URLService
+	cfg    *config.Config
+	svc    service.URLService
+	logger *zap.Logger
 }
 
 // NewShortenerService создаёт новую реализацию gRPC-сервиса ShortenerServiceServer.
 //
 // Функция оборачивает переданный URLService и сохраняет конфигурацию для
 // конструирования полных URL. Возвращаемый объект регистрируется в gRPC-сервере.
-func NewShortenerService(svc service.URLService, cfg *config.Config) shortener.ShortenerServiceServer {
+func NewShortenerService(svc service.URLService, cfg *config.Config, logger *zap.Logger) shortener.ShortenerServiceServer {
 	return &shortenerServer{svc: svc,
-		cfg: cfg}
+		cfg:    cfg,
+		logger: logger,
+	}
 }
 
 // ShortenURL реализует rpc ShortenURL.
@@ -50,9 +53,8 @@ func (s *shortenerServer) ShortenURL(ctx context.Context, req *shortener.URLShor
 		return nil, status.Error(codes.InvalidArgument, "url is required")
 	}
 
-	// Извлекаем userID из контекста
-	userIDVal := ctx.Value(middleware.UserIDKey)
-	userID, _ := userIDVal.(uuid.UUID) // если нет — будет uuid.Nil, сервис сам обработает
+	// Извлекаем userID из контекста через геттер
+	userID := middleware.GetUserID(ctx)
 
 	// Преобразуем gRPC-запрос в нашу внутреннюю модель
 	urlModel := model.URLModel{
@@ -66,10 +68,8 @@ func (s *shortenerServer) ShortenURL(ctx context.Context, req *shortener.URLShor
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Формируем полный короткий URL с BaseURL из конфига
-	fullURL := fmt.Sprintf("%s/%s",
-		strings.TrimRight(s.cfg.BaseURL, "/"),
-		saved.ShortURL)
+	// Формируем полный короткий URL
+	fullURL, _ := url.JoinPath(s.cfg.BaseURL, saved.ShortURL)
 
 	return &shortener.URLShortenResponse{
 		Result: fullURL,
@@ -103,11 +103,11 @@ func (s *shortenerServer) ExpandURL(ctx context.Context, req *shortener.URLExpan
 // Не требует дополнительных параметров (принимает emptypb.Empty).
 func (s *shortenerServer) ListUserURLs(ctx context.Context, req *emptypb.Empty) (*shortener.UserURLsResponse, error) {
 
-	// Извлекаем userID из контекста
-	userIDVal := ctx.Value(middleware.UserIDKey)
-	userID, ok := userIDVal.(uuid.UUID)
-	if !ok || userID == uuid.Nil {
-		// // Если userID нет, возвращаем пустой список
+	// Извлекаем userID из контекста через геттер
+	userID := middleware.GetUserID(ctx)
+
+	// Если userID не найден — возвращаем пустой список
+	if userID == uuid.Nil {
 		return &shortener.UserURLsResponse{
 			Urls: []*shortener.URLData{},
 		}, nil

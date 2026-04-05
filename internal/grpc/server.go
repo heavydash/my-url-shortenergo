@@ -49,7 +49,7 @@ type Server struct {
 // Возвращает готовый Server, готовый к вызову Start().
 func NewServer(svc service.URLService, cfg *config.Config, logger *zap.Logger) *Server {
 	// Создаём реализацию сервиса
-	serviceImpl := NewShortenerService(svc, cfg)
+	serviceImpl := NewShortenerService(svc, cfg, logger)
 
 	// Создаём gRPC сервер
 	grpcSrv := grpc.NewServer(

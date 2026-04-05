@@ -192,9 +192,12 @@ func main() {
 
 	// gRPC запуск сервера
 	grpcServer := grpc.NewServer(urlService, cfg, logger)
+	// Fail early
 	if err := grpcServer.Start(); err != nil {
-		logger.Error("failed to start gRPC server", zap.Error(err))
+		logger.Fatal("failed to start gRPC server", zap.Error(err))
+		os.Exit(1)
 	}
+	logger.Info("gRPC server started successfully", zap.String("address", cfg.GRPCAddr))
 
 	// Настройка graceful shutdown с отслеживанием сигналов ОС.
 	// Поддерживаются сигналы:
