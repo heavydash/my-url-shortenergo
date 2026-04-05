@@ -13,12 +13,15 @@
 package handler
 
 import (
+	"fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
 	"github.com/heavydash/my-url-shortenergo/internal/repository/mocks"
+	"github.com/heavydash/my-url-shortenergo/internal/util"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"net"
@@ -27,6 +30,23 @@ import (
 	"strings"
 	"testing"
 )
+
+// addAuthCookie добавляет в запрос валидную signed cookie.
+// Возвращает userID, который был использован
+func addAuthCookie(req *http.Request) uuid.UUID {
+	userID := uuid.New()
+
+	// Создаем валидную куку
+	rec := httptest.NewRecorder()
+	util.SetSignedCookie(rec, userID)
+	cookie := rec.Result().Cookies()[0]
+
+	req.AddCookie(cookie)
+
+	fmt.Printf("DEBUG: addAuthCookie - added cookie with value: %s\n", cookie.Value)
+
+	return userID
+}
 
 // TestShortenJSONHandler тестирует обработчик сокращения одиночной ссылки
 // через JSON (POST /api/shorten).
@@ -101,6 +121,9 @@ func TestShortenJSONHandler(t *testing.T) {
 			if tt.contentType != "" {
 				req.Header.Set("Content-Type", tt.contentType)
 			}
+
+			// Добавляем валидную куку
+			addAuthCookie(req)
 
 			// Выполняем запрос через роутер
 			router.ServeHTTP(w, req)
@@ -186,6 +209,9 @@ func TestBatchShortenHandler(t *testing.T) {
 			// Создаём HTTP-запрос с JSON-телом
 			req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
+
+			// Добавляем валидную куку
+			addAuthCookie(req)
 
 			// Выполняем запрос
 			router.ServeHTTP(w, req)

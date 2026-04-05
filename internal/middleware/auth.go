@@ -90,6 +90,7 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 				util.SetSignedCookie(w, userID)
 			} else {
 				logger.Info("Auth: cookie found", zap.String("cookie_value", cookie.Value))
+
 				// Есть кука, пытаемся распарсить
 				parsedID, parseErr := util.GetUserIDFromCookie(r)
 				if parseErr != nil {
@@ -99,8 +100,9 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 					util.SetSignedCookie(w, userID)
 				} else {
 					userID = parsedID
-					logger.Info("Auth: parsed userID", zap.String("user_id", userID.String()))
-					//нет SetSignedCookie - уже валидная
+					logger.Info("Auth: parsed userID",
+						zap.String("user_id", userID.String()),
+						zap.String("cookie_value", cookie.Value))
 				}
 			}
 

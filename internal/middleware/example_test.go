@@ -3,6 +3,7 @@ package middleware
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -68,8 +69,10 @@ func Example_middlewareChain() {
 
 	// Создаем цепочку middleware
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Context().Value(UserIDKey)
-		if userID != nil {
+		// Используем геттер вместо прямого UserIDKey
+		userID := GetUserID(r.Context())
+
+		if userID != uuid.Nil {
 			_, _ = fmt.Fprint(w, "Authenticated request")
 		} else {
 			_, _ = fmt.Fprint(w, "Anonymous request")

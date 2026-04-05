@@ -142,6 +142,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Достаем UserID при помощи геттера
 	userID := middleware.GetUserID(r.Context())
+
 	if userID == uuid.Nil {
 		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return

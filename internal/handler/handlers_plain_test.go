@@ -235,6 +235,9 @@ func TestShortenPlainHandler(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
+			// Добавляем валидную куку
+			addAuthCookie(req)
+
 			router.ServeHTTP(w, req)
 
 			assert.Equal(t, tt.wantCode, w.Code, tt.description)
