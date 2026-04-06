@@ -7,19 +7,18 @@
 //
 // # Основные возможности
 //
-//   - Auth — stateless-аутентификация пользователей через signed cookie "user_id".
-//   - ParseAuthHeader — парсинг и проверка токена авторизации (используется как в HTTP, так и в gRPC).
-//   - UserIDKey — типобезопасный ключ для хранения идентификатора пользователя в контексте.
+//   - Auth — stateless-аутентификация через signed cookie "user_id".
+//     Создаёт нового пользователя, если валидной куки нет.
+//   - GetUserID — предпочтительный способ получения userID из контекста.
+//   - ParseAuthHeader — парсинг и проверка токена авторизации (для HTTP и gRPC).
+//   - SetUserIDToContext — используется в gRPC-интерцепторе.
 //
-// # Пример использования
+// # Важные архитектурные решения
 //
-//	router := chi.NewRouter()
-//	router.Use(middleware.Auth(logger))
-//	router.Post("/api/shorten", handler.ShortenURL)
-//
-// В обработчике можно извлечь userID так:
-//
-//	userID := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
+//   - Ключ контекста (userIDKey) сделан неэкспортируемым, чтобы избежать
+//     случайных коллизий из других пакетов.
+//   - Прямой доступ к ключу запрещён. Всегда используем GetUserID().
+//   - Auth middleware является stateless — не хранит состояние на сервере.
 
 package middleware
 
@@ -34,15 +33,14 @@ import (
 
 // ctxKey — приватный тип ключа для хранения значений в контексте.
 //
-// Используется для создания уникального ключа UserIDKey. Приватный тип
-// гарантирует, что никто извне пакета не сможет случайно использовать тот же ключ
-// и вызвать коллизию значений в контексте.
+// Используется для создания уникального ключа UserIDKey. Приватный тип гарантирует, что никто извне пакета не сможет случайно
+// // создать такой же ключ и вызвать коллизию значений в контексте.
 type ctxKey string
 
-// UserIDKey — ключ для хранения идентификатора пользователя в контексте запроса.
+// UserIDKey — неэкспортируемый ключ для хранения идентификатора пользователя.
 //
-// Значение под этим ключом имеет тип uuid.UUID. Используется после успешной
-// аутентификации в middleware.Auth и в gRPC AuthInterceptor.
+// Значение под этим ключом имеет тип uuid.UUID.
+// Используется внутри Auth middleware и в gRPC AuthInterceptor.
 const userIDKey ctxKey = "userID"
 
 // Auth создает middleware для аутентификации пользователей на основе cookies.
@@ -51,7 +49,7 @@ const userIDKey ctxKey = "userID"
 //  1. Проверяет наличие валидной куки "user_id" в запросе
 //  2. Если кука отсутствует или невалидна - генерирует новый UUID и устанавливает куку
 //  3. Если кука валидна - извлекает из нее UUID пользователя
-//  4. Добавляет userID в контекст запроса для использования в обработчиках
+//  4. Сохраняет userID в контексте запроса под приватным ключом userIDKey
 //
 // Параметры:
 //   - logger: логгер для записи событий аутентификации
@@ -105,7 +103,7 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 						zap.String("cookie_value", cookie.Value))
 				}
 			}
-
+			// Помещаем userID в контекст
 			ctx := context.WithValue(r.Context(), userIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -113,8 +111,10 @@ func Auth(logger *zap.Logger) func(http.Handler) http.Handler {
 }
 
 // GetUserID извлекает userID из контекста.
-// Возвращает uuid.Nil, если userID отсутствует или имеет неверный тип.
-// Это предпочтительный способ получения userID как в HTTP-хендлерах, так и в gRPC.
+//
+// Возвращает:
+//   - uuid.UUID — идентификатор пользователя
+//   - uuid.Nil  — если userID отсутствует или имеет неверный тип
 func GetUserID(ctx context.Context) uuid.UUID {
 	if ctx == nil {
 		return uuid.Nil
@@ -155,7 +155,9 @@ func ParseAuthHeader(authHeader string) (uuid.UUID, error) {
 }
 
 // SetUserIDToContext помещает userID в контекст под правильным (неэкспортируемым) ключом.
-// Используется из других пакетов (например, gRPC), где нельзя напрямую обращаться к userIDKey.
+//
+// Используется из других пакетов (в первую очередь из gRPC AuthInterceptor),
+// где нельзя напрямую обращаться к неэкспортируемому ключу userIDKey.
 func SetUserIDToContext(ctx context.Context, userID uuid.UUID) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

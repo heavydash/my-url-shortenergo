@@ -29,13 +29,16 @@ package shortener;
 
 option go_package = "github.com/heavydash/my-url-shortenergo/proto/shortener";
 
-import "google/protobuf/empty.proto";
 
 // ShortenerService — основной gRPC-сервис для работы с короткими ссылками.
 //
-// Сервис предоставляет три метода, покрывающие основные сценарии использования:
-// создание короткой ссылки, разрешение (expand) короткой ссылки и получение
-// списка ссылок пользователя.
+// Сервис предоставляет три метода, полностью соответствующие HTTP API:
+//   - ShortenURL     ↔ POST /api/shorten
+//   - ExpandURL      ↔ GET /{id}
+//   - ListUserURLs   ↔ GET /api/user/urls
+//
+// Авторизация в gRPC осуществляется через unary-интерцептор AuthInterceptor.
+// Клиент должен передавать метаданные "authorization" с signed-токеном.
 service ShortenerService {
   // ShortenURL создаёт короткую ссылку из переданного оригинального URL.
   //
@@ -65,7 +68,7 @@ service ShortenerService {
   //
   // Возможные gRPC-статусы при ошибке:
   //   - INTERNAL — при ошибке получения данных из хранилища.
-  rpc ListUserURLs (google.protobuf.Empty) returns (UserURLsResponse);
+  rpc ListUserURLs (ListUserURLsRequest) returns (UserURLsResponse);
 }
 
 // URLShortenRequest — запрос на создание короткой ссылки.
@@ -97,6 +100,12 @@ message URLExpandResponse {
   // Пример: "https://www.example.com/very/long/path?param=123"
   string result = 1;
 }
+
+// ListUserURLsRequest — собственное пустое сообщение.
+// Это позволит в будущем добавлять параметры.
+// без нарушения обратной совместимости для клиентов.
+message ListUserURLsRequest {}
+
 
 // UserURLsResponse — список всех ссылок пользователя.
 message UserURLsResponse {

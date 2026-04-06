@@ -164,7 +164,7 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 		h.sendError(w, true, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	// Дублирование correlation_id
+	// Проверка на дубликаты correlation_id и валидность URL
 	seen := make(map[string]bool)
 	for _, item := range batch {
 		if seen[item.CorrelationID] {
