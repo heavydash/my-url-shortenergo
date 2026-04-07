@@ -216,7 +216,6 @@ func main() {
 	// Лог для Swagger'a
 	logger.Info("Swagger UI started successfully",
 		zap.String("url", fmt.Sprintf("http://%s/swagger/index.html", strings.TrimPrefix(cfg.ServerAddr, ":"))),
-		zap.String("spec_url", fmt.Sprintf("http://%s/swagger/doc.json", strings.TrimPrefix(cfg.ServerAddr, ":"))),
 	)
 
 	// gRPC запуск сервера

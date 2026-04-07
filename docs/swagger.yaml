@@ -13,7 +13,24 @@ info:
   termsOfService: https://github.com/heavydash/my-url-shortenergo
   title: URL Shortener API
   version: "1.0"
-paths: {}
+paths:
+  /ping:
+    get:
+      consumes:
+      - application/json
+      description: Возвращает статус "ok", если сервер запущен и готов принимать запросы
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный ответ
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Проверка работоспособности сервиса
+      tags:
+      - health
 securityDefinitions:
   ApiKeyAuth:
     description: Cookie-based authorization

@@ -142,6 +142,15 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 //
 //	Этот эндпоинт полезен для оркестраторов (Kubernetes, Docker Swarm)
 //	и систем мониторинга для проверки готовности сервиса.
+
+// PingHandler godoc
+// @Summary      Проверка работоспособности сервиса
+// @Description  Возвращает статус "ok", если сервер запущен и готов принимать запросы
+// @Tags         health
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]string  "Успешный ответ"
+// @Router       /ping [get]
 func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
