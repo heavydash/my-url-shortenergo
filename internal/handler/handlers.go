@@ -112,6 +112,28 @@ func NewHandler(
 //   - 400 Bad Request - невалидный URL или тело запроса
 //   - 409 Conflict - URL уже существует (возвращает существующий короткий URL)
 //   - 500 Internal Server Error - ошибка генерации ID или сохранения
+
+// ShortenHandler godoc
+// @Summary      Создать короткую ссылку
+// @Description  Основной обработчик сокращения URL.
+//
+//	Поддерживает два формата запроса:
+//	- `text/plain` для POST / (просто URL в теле)
+//	- `application/json` для POST /api/shorten
+//
+// @Tags         urls
+// @Accept       plain
+// @Accept       json
+// @Produce      json
+//
+// @Param        body  body     api.ShortenRequest  			true  "URL для сокращения"
+// @Success      201  {object}  api.ShortenResponse           "URL успешно сокращён"
+// @Success      409  {object}  api.ShortenResponse           "URL уже существовал ранее (возвращаем существующий)"
+// @Failure      400  {object}  api.ErrorResponse       "Некорректный URL или пустое тело запроса"
+// @Failure      401  {object}  api.ErrorResponse        "Пользователь не авторизован (нет cookie)"
+// @Failure      500  {object}  api.ErrorResponse        "Внутренняя ошибка сервера"
+// @Router       / [post]
+// @Router       /api/shorten [post]
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
 	h.logger.Info("ShortenHandler: request started", zap.Bool("isJSON", isJSON))
 

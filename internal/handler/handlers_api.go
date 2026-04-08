@@ -38,6 +38,23 @@ import (
 //	400 Bad Request - невалидный JSON или URL
 //	409 Conflict - URL уже существует
 //	500 Internal Server Error - ошибка сервера
+
+// ShortenJSONHandler godoc
+// @Summary      Создать короткую ссылку (JSON)
+// @Description  Принимает URL в формате JSON.
+//
+//	Используется для POST /api/shorten
+//
+// @Tags         urls
+// @Accept       json
+// @Produce      json
+// @Param        body  body      api.ShortenRequest  true  "URL для сокращения"
+// @Success      201  {object}  api.ShortenResponse
+// @Success      409  {object}  api.ShortenResponse
+// @Failure      400  {object}  api.ErrorResponse
+// @Failure      401  {object}  api.ErrorResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       /api/shorten [post]
 func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 	h.ShortenHandler(w, r, true)
 }
@@ -74,6 +91,22 @@ func (h *Handler) ShortenJSONHandler(w http.ResponseWriter, r *http.Request) {
 //	204 No Content - у пользователя нет сохраненных URL
 //	401 Unauthorized - отсутствует или невалидный user_id в cookies
 //	500 Internal Server Error - ошибка при получении данных
+
+// GetUserURLs godoc
+// @Summary      Получить все URL пользователя
+// @Description  Возвращает список всех сокращённых ссылок, созданных текущим пользователем.
+//
+//	Требует авторизации через cookie `token`.
+//	Если у пользователя нет ссылок — возвращает 204 No Content.
+//
+// @Tags         urls
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Success      200  {array}   model.URLModel  "Список URL пользователя"
+// @Success      204  "No Content - у пользователя нет сохранённых URL"
+// @Failure      401  {object}  api.ErrorResponse  "Пользователь не авторизован (нет или невалидная cookie)"
+// @Failure      500  {object}  api.ErrorResponse  "Внутренняя ошибка сервера"
+// @Router       /api/user/urls [get]
 func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	// Достаём из контекста при помощи геттера
 	userID := middleware.GetUserID(r.Context())
@@ -138,6 +171,24 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 //	201 Created - пакет успешно обработан
 //	400 Bad Request - невалидный JSON, дубликаты correlation_id, пустой batch
 //	500 Internal Server Error - ошибка при сохранении
+
+// BatchShortenHandler godoc
+// @Summary      Пакетное создание коротких ссылок
+// @Description  Принимает массив URL и возвращает соответствующие короткие ссылки.
+//
+//	Каждый элемент запроса должен содержать уникальный `correlation_id`.
+//	Требует авторизации через cookie.
+//
+// @Tags         urls
+// @Accept       json
+// @Produce      json
+// @Security     ApiKeyAuth
+// @Param        body  body      []api.BatchRequestItem  true  "Массив URL для сокращения"
+// @Success      201  {array}   api.BatchResponseItem  "Пакет успешно обработан"
+// @Failure      400  {object}  api.ErrorResponse  "Некорректный JSON, пустой массив, дубликаты correlation_id или невалидные URL"
+// @Failure      401  {object}  api.ErrorResponse  "Пользователь не авторизован"
+// @Failure      500  {object}  api.ErrorResponse  "Внутренняя ошибка сервера"
+// @Router       /api/shorten/batch [post]
 func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Достаем UserID при помощи геттера
@@ -253,6 +304,24 @@ func (h *Handler) BatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 //	202 Accepted - запрос на удаление принят в обработку
 //	400 Bad Request - невалидный JSON
 //	401 Unauthorized - отсутствует или невалидный user_id в cookies
+
+// DeleteUrls godoc
+// @Summary      Пометить URL на удаление
+// @Description  Помечает указанные короткие ссылки для асинхронного удаления.
+//
+//	Удаление выполняется в фоне через URLDeleter.
+//	Метод сразу возвращает 202 Accepted.
+//	Работает только с собственными ссылками пользователя (по user_id из cookie).
+//
+// @Tags         urls
+// @Accept       json
+// @Produce      plain
+// @Security     ApiKeyAuth
+// @Param        body  body      []string  true  "Массив коротких идентификаторов для удаления"  example(["abc123","def456"])
+// @Success      202  "Accepted - запрос на удаление принят в обработку"
+// @Failure      400  {object}  api.ErrorResponse  "Некорректный JSON или пустой массив"
+// @Failure      401  {object}  api.ErrorResponse  "Пользователь не авторизован (нет или невалидная cookie)"
+// @Router       /api/user/urls [delete]
 func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 	// Достаем UserID при помощи геттера
 	userID := middleware.GetUserID(r.Context())
@@ -320,6 +389,19 @@ func (h *Handler) DeleteUrls(w http.ResponseWriter, r *http.Request) {
 //	403 Forbidden   - запрос не из доверенной подсети
 //
 // Использует репозиторий через вызов repo.Stats().
+
+// GetInternalStats godoc
+// @Summary      Получить внутреннюю статистику сервиса
+// @Description  Возвращает общую статистику: количество сокращённых URL и пользователей.
+//
+//	**Доступен только из доверенной подсети**, указанной в конфигурации (TRUSTED_SUBNET).
+//	Проверка выполняется по заголовку `X-Real-IP`.
+//
+// @Tags         internal
+// @Produce      json
+// @Success      200  {object}  object{urls=int,users=int}  "Статистика сервиса"
+// @Failure      403  {object}  api.ErrorResponse  "Доступ запрещён: запрос не из доверенной подсети"
+// @Router       /api/internal/stats [get]
 func (h *Handler) GetInternalStats(w http.ResponseWriter, r *http.Request) {
 	// Проверка доступа из доверенной подсети
 	if !h.isRequestFromTrustedSubnet(r) {

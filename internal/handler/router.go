@@ -36,6 +36,8 @@ func SetupRouter(h *Handler) *chi.Mux {
 	router.Get("/swagger/*", httpSwagger.Handler(
 		// Адрес, по которому доступен сгенерированный swagger.json
 		httpSwagger.URL("/swagger/doc.json"),
+
+		// Основные настройки интерфейса:
 		// Включает возможность делиться прямыми ссылками на конкретные методы
 		httpSwagger.DeepLinking(true),
 		// При загрузке показываем только список эндпоинтов
@@ -44,6 +46,11 @@ func SetupRouter(h *Handler) *chi.Mux {
 		httpSwagger.DomID("swagger-ui"),
 		// Для сохранения введённого токена (cookie) между перезагрузками страницы
 		httpSwagger.PersistAuthorization(true),
+
+
+		httpSwagger.Layout("StandaloneLayout"),  // классический layout
+		httpSwagger.DefaultModelsExpandDepth(1), // показывать модели
+
 	))
 
 	// Логируем адрес Swagger UI сразу после регистрации маршрута
