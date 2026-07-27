@@ -42,7 +42,7 @@ import (
 //   - Потребление памяти растет с количеством URL
 //   - Не подходит для production с большим объемом данных
 type MemoryRepository struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex // несколько горутин смогут читать одновременно
 	urls    map[string]model.URLModel
 	baseURL string
 	logger  *zap.Logger
@@ -98,7 +98,7 @@ func NewMemoryRepository(baseURL string, logger *zap.Logger) *MemoryRepository {
 //   - urlModel: URLModel для сохранения (UUID может быть пустым)
 //
 // Возвращает:
-//   - model.URLModel: сохраненная модель с заполненными полями
+//   - *model.URLModel: указатель на сохранённую модель
 //   - error: ошибка если UUID уже существует или не удалось сгенерировать уникальный ID
 //
 // Пример использования:
@@ -129,10 +129,10 @@ func NewMemoryRepository(baseURL string, logger *zap.Logger) *MemoryRepository {
 //   - MaxDelay: максимальная задержка 150ms
 //   - LastErrorOnly: возврат только последней ошибки
 //   - OnRetry: логирование каждой неудачной попытки
-func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel) (model.URLModel, error) {
+func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel) (*model.URLModel, error) {
 
 	if ctx.Err() != nil {
-		return model.URLModel{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	// Защищаем map от одновременного доступа из разных горутин
@@ -146,19 +146,22 @@ func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel)
 			m.logger.Warn("Attempt to save copy UUID",
 				zap.String("uuid", urlModel.UUID),
 				zap.String("original", urlModel.OriginalURL))
-			// Коллизия — возвращаем пустую модель +  ошибку
-			return model.URLModel{}, fmt.Errorf("url with id %s already exists", urlModel.UUID)
+
+			return nil, fmt.Errorf("url with id %s already exists", urlModel.UUID)
 		}
 		// Всё ок — сохраняем копию модели в map
 		m.urls[urlModel.UUID] = urlModel
+
 		m.logger.Info("URL with unique UUID saved",
 			zap.String("uuid", urlModel.UUID),
 			zap.String("original", urlModel.OriginalURL))
-		// Возвращаем ту же копию, которую получили (она не изменилась)
-		return urlModel, nil
+		// Возвращаем указатель на копию сохранённой модели
+		saved := urlModel
+		return &saved, nil
 	}
 
-	var savedModel model.URLModel // сюда запишем финальную успешную модель
+	// UUID нужно сгенерировать
+	var saved model.URLModel // сюда запишем финальную успешную модель
 
 	// retry.Do функция, которая повторяет переданное замыкание
 	// до успеха или исчерпания попыток / отмены контекста
@@ -182,11 +185,14 @@ func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel)
 			}
 			// Успех
 			// Заполняем копию модели, которую получили на входе
-			urlModel.UUID = newID
+			saved = urlModel
 			// Сохраняем изменённую копию в хранилище
-			m.urls[newID] = urlModel // map хранит свою копию структуры
+			saved.UUID = newID // map хранит свою копию структуры
 			// Запоминаем успешный результат для возврата
-			savedModel = urlModel // ещё одна копия, финальная версия
+			saved.ShortURL = newID // ещё одна копия, финальная версия
+
+			// Сохраняем в map
+			m.urls[newID] = saved
 
 			return nil
 		},
@@ -220,16 +226,17 @@ func (m *MemoryRepository) SaveURL(ctx context.Context, urlModel model.URLModel)
 			zap.String("original_url", urlModel.OriginalURL),
 			zap.Error(err))
 		// Возвращаем пустую модель + ошибку с обёрткой
-		return model.URLModel{}, fmt.Errorf("failed to generate unique short ID after retries: %w", err)
+		return nil, fmt.Errorf("failed to generate unique short ID after retries: %w", err)
 	}
 
 	// Успех
 	// savedModel содержит полностью заполненную модель
 	m.logger.Info("Short URL created and saved",
-		zap.String("short_id", savedModel.UUID),
-		zap.String("original_url", savedModel.OriginalURL))
+		zap.String("short_id", saved.UUID),
+		zap.String("original_url", saved.OriginalURL))
+
 	// Возвращаем финальную версию
-	return savedModel, nil
+	return &saved, nil
 }
 
 // GetURL возвращает URL по его идентификатору.
@@ -263,8 +270,8 @@ func (m *MemoryRepository) GetURL(ctx context.Context, id string) (*model.URLMod
 		return nil, ctx.Err()
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	url, exists := m.urls[id]
 	if !exists {
@@ -315,7 +322,7 @@ func (m *MemoryRepository) SaveBatch(ctx context.Context, batch []model.URLModel
 	savedCount := 0
 	for _, item := range batch {
 		if item.UUID == "" {
-			m.logger.Warn("Batch element has been stole: Has no UUID",
+			m.logger.Warn("Batch element has been stolen: Has no UUID",
 				zap.String("original", item.OriginalURL))
 			continue
 		}
@@ -324,7 +331,7 @@ func (m *MemoryRepository) SaveBatch(ctx context.Context, batch []model.URLModel
 	}
 
 	if savedCount == 0 {
-		m.logger.Info("Batch element has been stole: Nothing to save")
+		m.logger.Info("Batch element has been stolen: Nothing to save")
 	}
 	if savedCount > 0 {
 		m.logger.Info("Batch element has been saved")
@@ -419,8 +426,8 @@ func (m *MemoryRepository) GetURLsByUser(ctx context.Context, userID uuid.UUID) 
 		return nil, ctx.Err()
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	if userID == uuid.Nil {
 		return []model.URLModel{}, nil
@@ -488,4 +495,47 @@ func (m *MemoryRepository) MarkAsDeleted(ctx context.Context, userID uuid.UUID, 
 	}
 
 	return nil
+}
+
+// Stats возвращает статистику сервиса из in-memory хранилища.
+//
+// Реализация:
+//   - Захватывает полную блокировку mu.Lock() для обеспечения consistency.
+//   - Подсчёт urls = len(m.urls) — O(1).
+//   - Подсчёт уникальных пользователей выполняется за O(N) путём прохода по всем URL
+//     и использования map[uuid.UUID]struct{}.
+//   - Записи с userID == uuid.Nil логируются как Warn, но не влияют на результат подсчёта.
+//
+// Важно:
+//   - При большом количестве URL (десятки и сотни тысяч) метод может быть относительно медленным
+//     и удерживать блокировку на всё время подсчёта.
+//   - Подходит только для разработки, тестов и небольших инстансов.
+func (m *MemoryRepository) Stats() (urls int, users int) {
+
+	// Захватываем блокировку
+	m.mu.RLock() // только чтение
+	defer m.mu.RUnlock()
+
+	// Подсчитываем urls
+	totalURLs := len(m.urls)
+	// Создаём map для уникальных пользователей
+	uniqueUsers := make(map[uuid.UUID]struct{})
+
+	// Проходим по всем URL и собираем уникальные UserID
+	for _, url := range m.urls {
+		if url.UserID != uuid.Nil {
+			uniqueUsers[url.UserID] = struct{}{} // добавляем
+		} else {
+			// только логируем предупреждение, но продолжаем подсчёт
+			m.logger.Warn("Found URL with empty user ID", zap.String("short_url", url.ShortURL))
+
+		}
+	}
+
+	// Считаем количество уникальных пользователей
+	urls = totalURLs
+	users = len(uniqueUsers)
+
+	// Возвращаем результат
+	return
 }

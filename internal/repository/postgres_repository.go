@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
@@ -93,7 +94,7 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //   - m: модель URL для сохранения (поле ID игнорируется, генерируется заново)
 //
 // Возвращает:
-//   - model.URLModel: сохраненная модель с заполненными полями ID и ShortURL
+//   - *model.URLModel: указатель на сохранённую модель
 //   - error: ErrConflict если URL уже существует, иначе ошибка базы данных
 //
 // Пример использования:
@@ -102,7 +103,6 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	defer cancel()
 //
 //	url := model.URLModel{
-//	    ShortURL:    "abc123",
 //	    OriginalURL: "https://example.com",
 //	    UserID:      userID,
 //	}
@@ -116,10 +116,10 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	INSERT ... ON CONFLICT (original_url) DO NOTHING
 //	- При успехе: возвращает сгенерированный ID
 //	- При конфликте: возвращает ErrNoRows, выполняется SELECT для поиска существующей записи
-func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error) {
+func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error) {
 
 	if ctx.Err() != nil {
-		return model.URLModel{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	query := `
@@ -145,7 +145,8 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (mod
 			zap.String("short_url", m.ShortURL),
 			zap.String("original_url", m.OriginalURL))
 
-		return m, nil
+		saved := m // создаём копию для возврата указателя
+		return &saved, nil
 	}
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -163,21 +164,21 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (mod
 				zap.String("original_url", m.OriginalURL),
 				zap.Error(err))
 
-			return model.URLModel{}, err
+			return nil, err
 		}
 
 		p.logger.Warn("URL already exists in PostgreSQL",
 			zap.String("short_url", existing.ShortURL),
 			zap.String("original_url", existing.OriginalURL))
 
-		return existing, ErrConflict
+		return &existing, ErrConflict
 	}
 
 	p.logger.Error("Failed to save URL to PostgreSQL",
 		zap.String("original_url", m.OriginalURL),
 		zap.Error(err))
 
-	return model.URLModel{}, err
+	return nil, err
 }
 
 // GetURL возвращает URL по его short идентификатору.
@@ -552,4 +553,37 @@ func (p *PostgresRepository) Close() error {
 		p.logger.Info("postgres: closed pool")
 	}
 	return nil
+}
+
+// Stats возвращает статистику сервиса из PostgreSQL.
+//
+// Реализация:
+//   - Выполняет один SQL-запрос:
+//     SELECT COUNT(*) AS urls, COUNT(DISTINCT user_id) AS users FROM urls
+//   - Использует контекст с таймаутом 5 секунд.
+//   - При любой ошибке (включая отмену контекста или проблемы с соединением)
+//     возвращает (0, 0) и логирует ошибку на уровне Error.
+//
+// Преимущества:
+//   - Высокая производительность даже при миллионах записей (благодаря индексам PostgreSQL).
+//   - Не блокирует приложение надолго.
+//   - Масштабируется линейно с ростом базы данных.
+func (p *PostgresRepository) Stats() (urls int, users int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if ctx.Err() != nil {
+		p.logger.Warn("Stats canceled by context", zap.Error(ctx.Err()))
+		return 0, 0
+	}
+
+	query := `SELECT COUNT(*) AS urls,
+       COUNT(DISTINCT user_id) AS users FROM urls`
+
+	err := p.pool.QueryRow(ctx, query).Scan(&urls, &users)
+	if err != nil {
+		p.logger.Error("Failed to get stats from PostgreSQL", zap.Error(err))
+		return 0, 0
+	}
+	return urls, users
 }

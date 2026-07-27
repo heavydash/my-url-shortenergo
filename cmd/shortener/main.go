@@ -22,24 +22,24 @@
 //   - BASE_URL - базовый URL для сокращённых ссылок (по умолчанию http://localhost:8080)
 //   - DATABASE_DSN - строка подключения к PostgreSQL (опционально)
 //   - FILE_STORAGE_PATH - путь к файловому хранилищу (опционально)
-//   - AUDIT_FILE_PATH - путь к файлу аудита (опционально)
-//   - AUDIT_REMOTE_URL - URL для отправки аудита (опционально)
+//   - AUDIT_FILE - путь к файлу аудита (опционально)
+//   - AUDIT_URL - URL для отправки аудита (опционально)
 //   - SHUTDOWN_TIMEOUT - таймаут graceful shutdown (по умолчанию 10s)
 //   - INIT_TIMEOUT - таймаут инициализации (по умолчанию 5s)
+//   - TRUSTED_SUBNET - доверенная подсеть для доступа к /api/internal/stats (например, "192.168.0.0/24")
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/audit/sender"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
+	auditService "github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	"github.com/heavydash/my-url-shortenergo/internal/service"
 	"github.com/heavydash/my-url-shortenergo/migrations"
 	"log"
 	"net"
@@ -122,9 +122,9 @@ func main() {
 
 	// Выбор хранилища данных
 	// Приоритет:
-	// 1. PostgreSQL (если указан DatabaseDSN и подключение успешно)
-	// 2. Файловое хранилище (если указан FileStoragePath)
-	// 3. In-memory хранилище (по умолчанию)
+	// 1. PostgreSQL — если явно указан DatabaseDSN
+	// 2. File storage — если указан FileStoragePath
+	// 3. In-memory (по умолчанию)
 	var repo repository.URLRepository
 
 	if cfg.DatabaseDSN != "" {
@@ -169,7 +169,7 @@ func main() {
 	}
 
 	// Создание сервиса аудита с несколькими отправителями
-	auditSvc := service.NewAuditService(cfg, logger, auditSenders...)
+	auditSvc := auditService.NewAuditService(cfg, logger, auditSenders...)
 
 	// Создаём deleter
 	urlDeleter := deleter.NewURLDeleter(
@@ -179,47 +179,15 @@ func main() {
 		cfg.DeletionFlushInterval,
 		cfg.DeletionMaxBatchSize,
 	)
+
+	// Создание бизнес слоя между хендлером и репо
+	urlService := service.NewURLService(repo)
+
 	// Создание основного обработчика HTTP-запросов
-	h := handler.NewHandler(repo, cfg, logger, auditSvc)
+	h := handler.NewHandler(urlService, cfg, logger, auditSvc)
 
-	// Настройка роутера Chi
-	router := chi.NewRouter()
-
-	// Глобальные middleware для всех запросов
-	router.Use(middleware.Logging(logger))        // Логирование запросов
-	router.Use(middleware.GzipMiddleware(logger)) // Сжатие ответов
-
-	// Публичный маршрут для редиректа по короткой ссылке
-	router.Get("/{id}", h.RedirectURL)
-
-	// Кастомная обработка 404
-	router.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	})
-
-	// Группа авторизованных маршрутов
-	// Требуют валидной cookie-авторизации
-	router.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(logger))
-		r.Get("/api/user/urls", h.GetUserURLs)   // Получение всех ссылок пользователя
-		r.Delete("/api/user/urls", h.DeleteUrls) // Удаление ссылок пользователя
-	})
-
-	// Публичные маршруты
-	router.Get("/ping", h.PingHandler) // Проверка доступности сервера
-	router.Get("/", h.HomeHandler)     // Домашняя страница
-
-	// Маршруты с опциональной авторизацией
-	// Если cookie есть — используем её, если нет — создаём новую
-	router.Post("/", middleware.Auth(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ShortenHandler(w, r, false) // Создание короткой ссылки (обычный запрос)
-	})).ServeHTTP)
-
-	router.Post("/api/shorten", middleware.Auth(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ShortenHandler(w, r, true) // Создание короткой ссылки (JSON API)
-	})).ServeHTTP)
-
-	router.Post("/api/shorten/batch", middleware.Auth(logger)(http.HandlerFunc(h.BatchShortenHandler)).ServeHTTP) // Пакетное создание
+	// Настройка роутера вынесена в отдельную функцию
+	router := handler.SetupRouter(h)
 
 	// Настройка graceful shutdown с отслеживанием сигналов ОС.
 	// Поддерживаются сигналы:
@@ -320,7 +288,7 @@ func main() {
 
 		// Graceful shutdown HTTP сервера.
 		// Даём серверу cfg.ShutdownTimeout секунд на завершение активных запросов.
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer shutdownCancel()
 
 		logger.Info("Shutting down HTTP server...")
@@ -349,7 +317,7 @@ func main() {
 		// У него свой буфер событий, нужно дождаться отправки всех.
 		auditStart := time.Now()
 		logger.Info("Shutting down audit service...")
-		auditCtx, auditCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), cfg.AuditShutdownTimeout)
 		defer auditCancel()
 		if err := auditSvc.Shutdown(auditCtx); err != nil {
 			logger.Error("Audit shutdown failed", zap.Error(err))

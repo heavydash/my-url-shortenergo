@@ -33,7 +33,7 @@ type URLRepository interface {
 	//   m   - модель URL для сохранения. Поле UUID может быть пустым для автоматической генерации
 	//
 	// Возвращает:
-	//   model.URLModel - сохраненная запись с заполненными полями UUID и ShortURL
+	//   *model.URLModel - указатель на сохранённую запись с заполненными полями UUID и ShortURL
 	//   error - ошибка если URL уже существует или возникла проблема при сохранении
 	//
 	// Пример:
@@ -41,7 +41,11 @@ type URLRepository interface {
 	//   defer cancel()
 	//   url := model.URLModel{OriginalURL: "https://example.com"}
 	//   saved, err := repo.SaveURL(ctx, url)
-	SaveURL(ctx context.Context, m model.URLModel) (model.URLModel, error)
+	//   if err != nil {
+	//       // обработка ошибки
+	//   }
+	//   fmt.Println(saved.ShortURL)
+	SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error)
 
 	// GetURL возвращает URL по его короткому идентификатору.
 	//
@@ -136,4 +140,17 @@ type URLRepository interface {
 	//   - Метод должен проверять принадлежность URL пользователю
 	//   - Удаление только своих URL (без прав на удаление чужих)
 	MarkAsDeleted(ctx context.Context, userID uuid.UUID, shortURLs []string) error
+
+	// Stats возвращает общую статистику сервиса.
+	//
+	// Возвращает:
+	//   urls  - общее количество записей URL в хранилище (включая помеченные как удалённые IsDeleted = true)
+	//   users - количество уникальных пользователей (COUNT(DISTINCT user_id)), игнорируя записи с user_id = uuid.Nil
+	//
+	// Метод предназначен исключительно для внутреннего использования эндпоинтом /api/internal/stats.
+	// Доступ к эндпоинту защищается проверкой доверенной подсети (TrustedSubnetNet).
+	//
+	// Особенности разных реализаций описаны в документации конкретных репозиториев.
+	// Метод не должен использоваться в горячем пути приложения, особенно в in-memory реализациях при большом объёме данных.
+	Stats() (urls int, users int)
 }

@@ -2,13 +2,13 @@
 package handler
 
 import (
+	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
-	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -93,7 +93,7 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	urlModel, err := h.repo.GetURL(r.Context(), id)
+	urlModel, err := h.service.GetURL(r.Context(), id)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			h.logger.Error("Error finding URL for ID %s: %v", zap.String("id", id), zap.Error(err))
@@ -142,7 +142,7 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 //	Этот эндпоинт полезен для оркестраторов (Kubernetes, Docker Swarm)
 //	и систем мониторинга для проверки готовности сервиса.
 func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
-	if err := h.repo.Ping(r.Context()); err != nil {
+	if err := h.service.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
 		http.Error(w, "db ping failed", http.StatusInternalServerError)
 		return
