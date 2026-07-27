@@ -3,6 +3,8 @@ package handler
 import (
 	"github.com/go-chi/chi/v5"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
+	"go.uber.org/zap"
 	"net/http"
 )
 
@@ -29,6 +31,34 @@ func SetupRouter(h *Handler) *chi.Mux {
 	// Глобальные middleware
 	router.Use(middleware.Logging(h.logger))
 	router.Use(middleware.GzipMiddleware(h.logger))
+
+	// Настраиваем интерактивную документацию OpenAPI/Swagger
+	router.Get("/swagger/*", httpSwagger.Handler(
+		// Адрес, по которому доступен сгенерированный swagger.json
+		httpSwagger.URL("/swagger/doc.json"),
+
+		// Основные настройки интерфейса:
+		// Включает возможность делиться прямыми ссылками на конкретные методы
+		httpSwagger.DeepLinking(true),
+		// При загрузке показываем только список эндпоинтов
+		httpSwagger.DocExpansion("list"),
+		// ID контейнера в DOM
+		httpSwagger.DomID("swagger-ui"),
+		// Для сохранения введённого токена (cookie) между перезагрузками страницы
+		httpSwagger.PersistAuthorization(true),
+
+
+		httpSwagger.Layout("StandaloneLayout"),  // классический layout
+		httpSwagger.DefaultModelsExpandDepth(1), // показывать модели
+
+	))
+
+	// Логируем адрес Swagger UI сразу после регистрации маршрута
+	// Логгирование здесь, а не в main.go, потому что роутер настраивается в handler
+	h.logger.Info("Swagger UI is available",
+		zap.String("url", "http://localhost:8080/swagger/index.html"), // можно сделать динамическим позже
+		zap.String("json_spec", "http://localhost:8080/swagger/doc.json"),
+	)
 
 	// Публичный маршрут для редиректа
 	router.Get("/{id}", h.RedirectURL)

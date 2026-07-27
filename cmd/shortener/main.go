@@ -27,6 +27,26 @@
 //   - SHUTDOWN_TIMEOUT - таймаут graceful shutdown (по умолчанию 10s)
 //   - INIT_TIMEOUT - таймаут инициализации (по умолчанию 5s)
 //   - TRUSTED_SUBNET - доверенная подсеть для доступа к /api/internal/stats (например, "192.168.0.0/24")
+
+// @title           URL Shortener API
+// @version         1.0
+// @description     Сервис сокращения URL с поддержкой различных хранилищ, аудита и graceful shutdown.
+// @termsOfService  https://github.com/heavydash/my-url-shortenergo
+
+// @contact.name   API Support
+// @contact.url    https://github.com/heavydash/my-url-shortenergo/issues
+// @contact.email  your-email@example.com
+
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
+
+// @host      localhost:8080
+// @BasePath  /
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in         cookie
+// @name       token
+// @description Cookie-based authorization
 package main
 
 import (
@@ -38,6 +58,7 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/config/db"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
+	"github.com/heavydash/my-url-shortenergo/internal/grpc"
 	"github.com/heavydash/my-url-shortenergo/internal/handler"
 	"github.com/heavydash/my-url-shortenergo/internal/service"
 	"github.com/heavydash/my-url-shortenergo/migrations"
@@ -47,6 +68,7 @@ import (
 	_ "net/http/pprof" // Подключает pprof для профилирования
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,6 +77,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
+
+	_ "github.com/heavydash/my-url-shortenergo/docs"
 )
 
 // Переменные версии заполняются при сборке через ldflags.
@@ -188,6 +212,20 @@ func main() {
 
 	// Настройка роутера вынесена в отдельную функцию
 	router := handler.SetupRouter(h)
+
+	// Лог для Swagger'a
+	logger.Info("Swagger UI started successfully",
+		zap.String("url", fmt.Sprintf("http://%s/swagger/index.html", strings.TrimPrefix(cfg.ServerAddr, ":"))),
+	)
+
+	// gRPC запуск сервера
+	grpcServer := grpc.NewServer(urlService, cfg, logger)
+	// Fail early
+	if err := grpcServer.Start(); err != nil {
+		logger.Fatal("failed to start gRPC server", zap.Error(err))
+		os.Exit(1)
+	}
+	logger.Info("gRPC server started successfully", zap.String("address", cfg.GRPCAddr))
 
 	// Настройка graceful shutdown с отслеживанием сигналов ОС.
 	// Поддерживаются сигналы:

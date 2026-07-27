@@ -1,23 +1,22 @@
 // Package handler предоставляет HTTP-обработчики для сервиса сокращения URL.
 //
 // Основные эндпоинты:
+//   - POST /           - сокращение URL в plain text формате
+//   - POST /api/shorten - сокращение URL в JSON формате
+//   - GET  /{id}       - редирект по короткому URL
+//   - GET  /ping       - health check сервиса
+//   - GET  /           - главная страница с документацией
+//   - POST /api/shorten/batch - пакетное сокращение
+//   - GET  /api/user/urls     - список URL пользователя
+//   - DELETE /api/user/urls   - пометка URL на удаление
 //
-//	POST /           - сокращение URL (plain text)
-//	POST /api/shorten - сокращение URL (JSON)
-//	GET  /{id}       - редирект по сокращенному URL
-//	GET  /ping       - проверка здоровья сервиса
-//	GET  /           - документация API
-//	POST /api/shorten/batch - пакетное сокращение URL
-//	GET  /api/user/urls - получение URL пользователя
-//
-// Все эндпоинты поддерживают gzip сжатие и логирование.
+// Все эндпоинты поддерживают gzip-сжатие и логирование через middleware.
 package handler
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	auditservice "github.com/heavydash/my-url-shortenergo/internal/audit/service"
 	"github.com/heavydash/my-url-shortenergo/internal/repository"
 	urlservice "github.com/heavydash/my-url-shortenergo/internal/service"
@@ -30,11 +29,9 @@ import (
 	"github.com/heavydash/my-url-shortenergo/internal/audit"
 	"github.com/heavydash/my-url-shortenergo/internal/config"
 	"github.com/heavydash/my-url-shortenergo/internal/deleter"
-	"github.com/heavydash/my-url-shortenergo/internal/idgen"
+	"github.com/heavydash/my-url-shortenergo/internal/generator"
 	"github.com/heavydash/my-url-shortenergo/internal/middleware"
 	"github.com/heavydash/my-url-shortenergo/internal/model"
-	"github.com/heavydash/my-url-shortenergo/internal/util"
-
 	"go.uber.org/zap"
 )
 
@@ -43,11 +40,11 @@ import (
 //
 // Поля:
 //
-//	repo     - репозиторий для хранения URL (память, файл, PostgreSQL)
-//	cfg      - конфигурация приложения (базовый URL, настройки удаления)
-//	logger   - логгер для записи событий
-//	deleter  - асинхронный обработчик удаления URL
-//	auditSvc - сервис аудита для отслеживания операций
+//   - service  - бизнес-слой (URLService)
+//     cfg      - конфигурация приложения (базовый URL, настройки удаления)
+//     logger   - логгер для записи событий
+//     deleter  - асинхронный обработчик удаления URL
+//     auditSvc - сервис аудита для отслеживания операций
 type Handler struct {
 	service  urlservice.URLService
 	cfg      *config.Config
@@ -59,31 +56,24 @@ type Handler struct {
 // NewHandler создает новый экземпляр HTTP обработчика со всеми зависимостями.
 //
 // Параметры:
+//   - service  - бизнес-слой (URLService)
+//   - cfg      - конфигурация приложения (может быть nil в тестах)
+//   - logger   - логгер (если nil — будет создан no-op)
+//   - auditSvc - сервис аудита (может быть nil)
 //
-//	repo     - репозиторий для хранения URL (обязательно)
-//	cfg      - конфигурация приложения, может быть nil в тестах
-//	logger   - логгер, если nil будет создан no-op логгер
-//	auditSvc - сервис аудита, может быть nil
-//
-// Возвращает:
-//
-//	*Handler - готовый к использованию обработчик с инициализированным deleter
-//
-// Примечания:
-//   - Автоматически создает URLDeleter с настройками из конфига или значениями по умолчанию
-//   - Если cfg nil, использует дефолтные значения: bufferSize=1000, flushInterval=500ms, maxBatchSize=1000
+// Возвращает готовый Handler с инициализированным deleter.
 func NewHandler(
 	service urlservice.URLService,
 	cfg *config.Config,
 	logger *zap.Logger,
-	auditSvc service.Service,
+	auditSvc auditservice.Service,
 ) *Handler {
 	effectiveLogger := logger
 	if effectiveLogger == nil {
 		effectiveLogger = zap.NewNop()
 	}
 
-	// создаем Deleter
+	// создаем Deleter для мягкого удаления URL
 	del := deleter.NewURLDeleter(
 		service,
 		effectiveLogger,
@@ -101,34 +91,54 @@ func NewHandler(
 	}
 }
 
-// ShortenHandler обрабатывает запросы на сокращение URL.
-// Внутренний метод, используется как ShortenPlainHandler и ShortenJSONHandler.
+// ShortenHandler — внутренний метод, который используется ShortenPlainHandler и ShortenJSONHandler.
+// Выполняет основную логику сокращения одной ссылки.
 //
 // Параметры:
-//
-//	w       - ResponseWriter для записи ответа
-//	r       - Request с телом запроса
-//	isJSON  - true для JSON формата, false для plain text
+//   - w      - ResponseWriter для записи ответа
+//   - r      - Request с телом запроса
+//   - isJSON - true для JSON формата, false для plain text
 //
 // Логика работы:
 //  1. Парсит URL из тела запроса (JSON или plain text)
-//  2. Валидирует URL формат
-//  3. Получает/генерирует userID из cookies
+//  2. Валидирует формат URL
+//  3. Получает или создаёт userID из cookies
 //  4. Генерирует уникальный короткий ID
-//  5. Сохраняет в репозиторий
-//  6. Возвращает полный сокращенный URL
+//  5. Сохраняет запись в репозиторий
+//  6. Возвращает полный сокращённый URL клиенту
 //
 // Коды ответа:
+//   - 201 Created - URL успешно сокращён
+//   - 400 Bad Request - невалидный URL или тело запроса
+//   - 409 Conflict - URL уже существует (возвращает существующий короткий URL)
+//   - 500 Internal Server Error - ошибка генерации ID или сохранения
+
+// ShortenHandler godoc
+// @Summary      Создать короткую ссылку
+// @Description  Основной обработчик сокращения URL.
 //
-//	201 Created - URL успешно сокращен
-//	400 Bad Request - невалидный URL или тело запроса
-//	409 Conflict - URL уже существует (возвращает существующий короткий URL)
-//	500 Internal Server Error - ошибка генерации ID или сохранения
+//	Поддерживает два формата запроса:
+//	- `text/plain` для POST / (просто URL в теле)
+//	- `application/json` для POST /api/shorten
+//
+// @Tags         urls
+// @Accept       plain
+// @Accept       json
+// @Produce      json
+//
+// @Param        body  body     api.ShortenRequest  			true  "URL для сокращения"
+// @Success      201  {object}  api.ShortenResponse           "URL успешно сокращён"
+// @Success      409  {object}  api.ShortenResponse           "URL уже существовал ранее (возвращаем существующий)"
+// @Failure      400  {object}  api.ErrorResponse       "Некорректный URL или пустое тело запроса"
+// @Failure      401  {object}  api.ErrorResponse        "Пользователь не авторизован (нет cookie)"
+// @Failure      500  {object}  api.ErrorResponse        "Внутренняя ошибка сервера"
+// @Router       / [post]
+// @Router       /api/shorten [post]
 func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON bool) {
 	h.logger.Info("ShortenHandler: request started", zap.Bool("isJSON", isJSON))
 
 	h.logger.Debug("ShortenHandler: parsing request body")
-	//Парсинг запроса
+	// Парсинг тела запроса
 	reqURL, err := h.parseRequestBody(r, isJSON)
 	if err != nil {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
@@ -136,24 +146,23 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	}
 	h.logger.Debug("ShortenHandler: parsed URL", zap.String("original_url", reqURL))
 
-	//Валидация URL
+	// Валидация URL
 	if !h.isValidURL(reqURL) {
 		h.sendError(w, isJSON, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	// Получаем userID из контекста
-	userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID)
-
-	if !ok || userID == uuid.Nil {
-		userID = uuid.New()
-		util.SetSignedCookie(w, userID)
+	// Получаем userID из геттера
+	userID := middleware.GetUserID(r.Context())
+	if userID == uuid.Nil {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
 	}
 
 	h.logger.Debug("ShortenHandler: userID", zap.String("user_id", userID.String()))
 
-	//Генерация ID
-	id, err := idgen.IDGen()
+	// Генерация короткого ID
+	id, err := generator.IDGen()
 	if err != nil || id == "" {
 		h.logger.Error("Failed to generate ID", zap.Error(err))
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
@@ -161,7 +170,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 	}
 	h.logger.Debug("ShortenHandler: generated ID", zap.String("id", id))
 
-	//Модель
+	// Создаём модель для сохранения
 	m := model.URLModel{
 		UUID:        id,
 		ShortURL:    id,
@@ -175,7 +184,7 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		zap.String("original_url", m.OriginalURL),
 		zap.String("user_id", userID.String()))
 
-	//Сохранение
+	// Сохраняем в репозиторий
 	saved, err := h.service.SaveURL(r.Context(), m)
 	if err != nil {
 		h.logger.Error("ShortenHandler: SaveURL failed", zap.Error(err))
@@ -193,19 +202,20 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 		h.sendError(w, isJSON, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	// 201
+	// Формируем полный короткий URL при  201
 	fullURL := fmt.Sprintf("%s/%s", strings.TrimRight(h.cfg.BaseURL, "/"),
 		saved.ShortURL)
 	h.logger.Info("ShortenHandler: URL saved successfully", zap.String("short_url",
 		fullURL))
 
-	// Добавляем аудит
+	// Добавляем событие в аудит
 	userIDStr := ""
 	if userID != uuid.Nil {
 		userIDStr = userID.String()
 	}
 	h.auditSvc.SendAsync(audit.NewShortenEvent(userIDStr, reqURL))
 
+	// Отправляем ответ клиенту
 	if isJSON {
 		h.sendResponse(w, isJSON, model.Response{Result: fullURL}, http.StatusCreated)
 	} else {
@@ -214,12 +224,11 @@ func (h *Handler) ShortenHandler(w http.ResponseWriter, r *http.Request, isJSON 
 }
 
 // parseRequestBody парсит тело HTTP запроса в зависимости от формата (JSON или plain text).
-// Используется внутренне в ShortenHandler.
+// Используется только внутри ShortenHandler.
 //
 // Возвращает:
-//
-//	string - распарсенный URL
-//	error  - ошибка парсинга или чтения тела
+//   - string - распарсенный URL
+//   - error  - ошибка парсинга или чтения тела
 func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -242,12 +251,11 @@ func (h *Handler) parseRequestBody(r *http.Request, isJSON bool) (string, error)
 	return string(body), nil
 }
 
-// isValidURL проверяет валидность URL строки.
-// Проверяет наличие схемы (http:// или https://) и корректность формата.
+// isValidURL проверяет, что строка является валидным URL с http/https схемой.
+// Используется только внутри ShortenHandler.
 //
 // Возвращает:
-//
-//	bool - true если URL валиден, false в противном случае
+//   - bool - true если URL валиден, false в противном случае
 func (h *Handler) isValidURL(u string) bool {
 	if u == "" || (!strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://")) {
 		return false
@@ -256,8 +264,8 @@ func (h *Handler) isValidURL(u string) bool {
 	return err == nil
 }
 
-// sendResponse отправляет HTTP ответ в правильном формате (JSON или plain text).
-// Используется для успешных ответов от обработчиков.
+// sendResponse отправляет успешный ответ в нужном формате (JSON или plain text).
+// Используется внутри хендлеров.
 func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, data any, status int) {
 	if isJSON {
 		w.Header().Set("Content-Type", "application/json")
@@ -279,7 +287,8 @@ func (h *Handler) sendResponse(w http.ResponseWriter, isJSON bool, data any, sta
 	_, _ = w.Write([]byte(str))
 }
 
-// sendError отправляет HTTP ответ с ошибкой в правильном формате (JSON или plain text).
+// sendError отправляет ответ с ошибкой в нужном формате (JSON или plain text).
+// Используется внутри хендлеров.
 func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, status int) {
 	if isJSON {
 		resp := map[string]string{"error": msg}
@@ -295,10 +304,6 @@ func (h *Handler) sendError(w http.ResponseWriter, isJSON bool, msg string, stat
 
 // Close освобождает ресурсы обработчика, останавливая deleter.
 // Должен вызываться при завершении работы приложения.
-//
-// Возвращает:
-//
-//	error - ошибка остановки deleter, если возникла
 func (h *Handler) Close() error {
 	if h.deleter != nil {
 		return h.deleter.Close()

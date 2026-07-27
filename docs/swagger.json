@@ -1,0 +1,525 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Сервис сокращения URL с поддержкой различных хранилищ, аудита и graceful shutdown.",
+        "title": "URL Shortener API",
+        "termsOfService": "https://github.com/heavydash/my-url-shortenergo",
+        "contact": {
+            "name": "API Support",
+            "url": "https://github.com/heavydash/my-url-shortenergo/issues",
+            "email": "your-email@example.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/": {
+            "get": {
+                "description": "Возвращает простое информационное сообщение о сервисе.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "general"
+                ],
+                "summary": "Главная страница сервиса",
+                "responses": {
+                    "200": {
+                        "description": "URL Shortener Service - Use POST / to shorten and GET /{id} to redirect",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "405": {
+                        "description": "Метод не разрешён (разрешён только GET)",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Принимает URL в виде обычного текста (не JSON) в теле запроса.",
+                "consumes": [
+                    "text/plain"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Создать короткую ссылку (plain text)",
+                "parameters": [
+                    {
+                        "description": "URL для сокращения",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.ShortenResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ShortenResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/internal/stats": {
+            "get": {
+                "description": "Возвращает общую статистику: количество сокращённых URL и пользователей.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Получить внутреннюю статистику сервиса",
+                "responses": {
+                    "200": {
+                        "description": "Статистика сервиса",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "urls": {
+                                    "type": "integer"
+                                },
+                                "users": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Доступ запрещён: запрос не из доверенной подсети",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/shorten": {
+            "post": {
+                "description": "Принимает URL в формате JSON.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Создать короткую ссылку (JSON)",
+                "parameters": [
+                    {
+                        "description": "URL для сокращения",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.ShortenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/api.ShortenResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ShortenResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/shorten/batch": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Принимает массив URL и возвращает соответствующие короткие ссылки.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Пакетное создание коротких ссылок",
+                "parameters": [
+                    {
+                        "description": "Массив URL для сокращения",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.BatchRequestItem"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Пакет успешно обработан",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.BatchResponseItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Некорректный JSON, пустой массив, дубликаты correlation_id или невалидные URL",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Пользователь не авторизован",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Внутренняя ошибка сервера",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/urls": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Возвращает список всех сокращённых ссылок, созданных текущим пользователем.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Получить все URL пользователя",
+                "responses": {
+                    "200": {
+                        "description": "Список URL пользователя",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.URLModel"
+                            }
+                        }
+                    },
+                    "204": {
+                        "description": "No Content - у пользователя нет сохранённых URL"
+                    },
+                    "401": {
+                        "description": "Пользователь не авторизован (нет или невалидная cookie)",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Внутренняя ошибка сервера",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Помечает указанные короткие ссылки для асинхронного удаления.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Пометить URL на удаление",
+                "parameters": [
+                    {
+                        "example": "[\"abc123\",\"def456\"]",
+                        "description": "Массив коротких идентификаторов для удаления",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted - запрос на удаление принят в обработку"
+                    },
+                    "400": {
+                        "description": "Некорректный JSON или пустой массив",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Пользователь не авторизован (нет или невалидная cookie)",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ping": {
+            "get": {
+                "description": "Возвращает \"OK\", если сервер и подключение к базе данных работают корректно.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Проверка работоспособности сервиса",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "db ping failed",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/{id}": {
+            "get": {
+                "description": "Выполняет перенаправление (HTTP 307 Temporary Redirect) на оригинальный URL.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "urls"
+                ],
+                "summary": "Редирект по короткой ссылке",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"4z31jnFH\"",
+                        "description": "Короткий идентификатор ссылки",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "307": {
+                        "description": "Temporary Redirect на оригинальный URL",
+                        "headers": {
+                            "string": {
+                                "type": "Location",
+                                "description": "Оригинальный URL\"  example(\"https://www.amazon.com\")"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "Gone",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.BatchRequestItem": {
+            "type": "object",
+            "required": [
+                "original_url"
+            ],
+            "properties": {
+                "correlation_id": {
+                    "type": "string",
+                    "example": "req-1"
+                },
+                "original_url": {
+                    "type": "string",
+                    "example": "https://www.example.com/page1"
+                }
+            }
+        },
+        "api.BatchResponseItem": {
+            "type": "object",
+            "properties": {
+                "correlation_id": {
+                    "type": "string",
+                    "example": "req-1"
+                },
+                "short_url": {
+                    "type": "string",
+                    "example": "http://localhost:8080/abc123"
+                }
+            }
+        },
+        "api.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Invalid request"
+                }
+            }
+        },
+        "api.ShortenRequest": {
+            "type": "object",
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "example": "https://www.google.com"
+                }
+            }
+        },
+        "api.ShortenResponse": {
+            "type": "object",
+            "properties": {
+                "result": {
+                    "type": "string",
+                    "example": "http://localhost:8080/N2tTa3Kr"
+                }
+            }
+        },
+        "model.URLModel": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "description": "ID уникальный идентификатор записи в базе данных.\n\nГенерируется базой данных (autoincrement) или приложением.\nИспользуется как первичный ключ для JOIN операций.\n\nОсобенности:\n  - Не используется в публичных API (клиенты не видят)\n  - UUID v4 для распределенных систем\n  - Может быть заменен на BIGSERIAL для PostgreSQL",
+                    "type": "string"
+                },
+                "original_url": {
+                    "description": "OriginalURL содержит оригинальный (длинный) URL.\n\nСохраняется \"как есть\" от пользователя.\nМаксимальная длина зависит от БД (TEXT или VARCHAR(2000)).\n\nПример: \"https://example.com/very/long/path?query=value\"",
+                    "type": "string"
+                },
+                "short_url": {
+                    "description": "ShortURL содержит сокращенный идентификатор URL.\n\nФормат: короткая строка (6-8 символов) из [a-zA-Z0-9]\nПример: \"abc123\", \"XyZ789\"\n\nИспользуется в:\n  - Публичных ссылках: http://short.ly/{short_url}\n  - Поиске URL в репозитории\n  - Уникальный индекс в базе данных",
+                    "type": "string"
+                },
+                "uuid": {
+                    "description": "UUID содержит строковое представление ID для JSON сериализации.\n\nОпциональное поле, используется если нужно вернуть ID\nв JSON ответах. В большинстве случаев не используется.\n\nПример: \"550e8400-e29b-41d4-a716-446655440000\"",
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "Cookie-based authorization",
+            "type": "apiKey",
+            "name": "token",
+            "in": "cookie"
+        }
+    }
+}

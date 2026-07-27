@@ -61,6 +61,12 @@ type Config struct {
 	// Флаг: -d, env: DATABASE_DSN
 	DatabaseDSN string
 
+	// GRPCAddr - адрес для запуска gRPC сервера.
+	// Формат: ":9090", "localhost:9090"
+	// По умолчанию ":9090"
+	// Флаг: -grpc, env: GRPC_ADDRESS
+	GRPCAddr string
+
 	// Поля для Deleter'а (асинхронного удаления URL)
 
 	// DeletionQueueBuffer - размер буфера очереди задач на удаление.
@@ -197,6 +203,9 @@ type Config struct {
 //	-b    : базовый URL (default: "http://localhost:8080")
 //	-f    : путь к файлу хранилища
 //	-d    : DSN для PostgreSQL
+//
+// -grpcAddr: адрес для запуска gRPC сервера.
+//
 //	-dq   : размер буфера очереди удаления (default: 1000)
 //	-df   : интервал сброса удаления (default: "50ms")
 //	-dm   : максимальный размер батча удаления (default: 1000)
@@ -227,6 +236,7 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 	b := fs.String("b", "http://localhost:8080", "base URL for shortened links")
 	f := fs.String("f", "", "file path to store the URL")
 	d := fs.String("d", "", "DSN to store the URL")
+	grpcAddr := fs.String("grpc", ":9090", "address to run gRPC server")
 
 	// Флаги для Deleter
 	dq := fs.Int("dq", 1000, "deletion queue buffer size (default 1000)")
@@ -271,6 +281,7 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "",
 		DatabaseDSN:     "",
+		GRPCAddr:        ":9090",
 		// Deleter
 		DeletionQueueBuffer:   1000,
 		DeletionFlushInterval: 50 * time.Millisecond,
@@ -327,6 +338,7 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 	defaultB := "http://localhost:8080"
 	defaultF := ""
 	defaultD := ""
+	defaultGRPCAddr := ":9090"
 	// Deletion
 	defaultDQ := 1000
 	defaultDF := "50ms"
@@ -364,6 +376,9 @@ func NewConfig(logger *zap.Logger) (*Config, error) {
 	}
 	if *d != defaultD {
 		cfg.DatabaseDSN = *d
+	}
+	if *grpcAddr != defaultGRPCAddr {
+		cfg.GRPCAddr = *grpcAddr
 	}
 	if *dq != defaultDQ {
 		cfg.DeletionQueueBuffer = *dq
@@ -501,6 +516,9 @@ func overwriteFromEnv(cfg *Config) {
 	}
 	if val, ok := os.LookupEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = val
+	}
+	if val, ok := os.LookupEnv("GRPC_ADDR"); ok {
+		cfg.GRPCAddr = val
 	}
 
 	// Deleter
@@ -689,6 +707,7 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 		BaseURL         string `json:"base_url"`
 		FileStoragePath string `json:"file_storage_path"`
 		DatabaseDSN     string `json:"database_dsn"`
+		GRPCAddr        string `json:"grpc_addr"`
 		// Deleter
 		DeletionQueueBuffer   *int   `json:"deletion_queue_buffer"`
 		DeletionFlushInterval string `json:"deletion_flush_interval"`
@@ -736,6 +755,9 @@ func loadFromJSON(path string, cfg *Config, logger *zap.Logger) error {
 	}
 	if fileCfg.DatabaseDSN != "" {
 		cfg.DatabaseDSN = fileCfg.DatabaseDSN
+	}
+	if fileCfg.GRPCAddr != "" {
+		cfg.GRPCAddr = fileCfg.GRPCAddr
 	}
 	// Deleter
 	if fileCfg.DeletionQueueBuffer != nil {

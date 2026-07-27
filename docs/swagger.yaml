@@ -1,0 +1,381 @@
+basePath: /
+definitions:
+  api.BatchRequestItem:
+    properties:
+      correlation_id:
+        example: req-1
+        type: string
+      original_url:
+        example: https://www.example.com/page1
+        type: string
+    required:
+    - original_url
+    type: object
+  api.BatchResponseItem:
+    properties:
+      correlation_id:
+        example: req-1
+        type: string
+      short_url:
+        example: http://localhost:8080/abc123
+        type: string
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        example: Invalid request
+        type: string
+    type: object
+  api.ShortenRequest:
+    properties:
+      url:
+        example: https://www.google.com
+        type: string
+    required:
+    - url
+    type: object
+  api.ShortenResponse:
+    properties:
+      result:
+        example: http://localhost:8080/N2tTa3Kr
+        type: string
+    type: object
+  model.URLModel:
+    properties:
+      id:
+        description: |-
+          ID уникальный идентификатор записи в базе данных.
+
+          Генерируется базой данных (autoincrement) или приложением.
+          Используется как первичный ключ для JOIN операций.
+
+          Особенности:
+            - Не используется в публичных API (клиенты не видят)
+            - UUID v4 для распределенных систем
+            - Может быть заменен на BIGSERIAL для PostgreSQL
+        type: string
+      original_url:
+        description: |-
+          OriginalURL содержит оригинальный (длинный) URL.
+
+          Сохраняется "как есть" от пользователя.
+          Максимальная длина зависит от БД (TEXT или VARCHAR(2000)).
+
+          Пример: "https://example.com/very/long/path?query=value"
+        type: string
+      short_url:
+        description: |-
+          ShortURL содержит сокращенный идентификатор URL.
+
+          Формат: короткая строка (6-8 символов) из [a-zA-Z0-9]
+          Пример: "abc123", "XyZ789"
+
+          Используется в:
+            - Публичных ссылках: http://short.ly/{short_url}
+            - Поиске URL в репозитории
+            - Уникальный индекс в базе данных
+        type: string
+      uuid:
+        description: |-
+          UUID содержит строковое представление ID для JSON сериализации.
+
+          Опциональное поле, используется если нужно вернуть ID
+          в JSON ответах. В большинстве случаев не используется.
+
+          Пример: "550e8400-e29b-41d4-a716-446655440000"
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: your-email@example.com
+    name: API Support
+    url: https://github.com/heavydash/my-url-shortenergo/issues
+  description: Сервис сокращения URL с поддержкой различных хранилищ, аудита и graceful
+    shutdown.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://github.com/heavydash/my-url-shortenergo
+  title: URL Shortener API
+  version: "1.0"
+paths:
+  /:
+    get:
+      description: Возвращает простое информационное сообщение о сервисе.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: URL Shortener Service - Use POST / to shorten and GET /{id}
+            to redirect
+          schema:
+            type: string
+        "405":
+          description: Метод не разрешён (разрешён только GET)
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Главная страница сервиса
+      tags:
+      - general
+    post:
+      consumes:
+      - text/plain
+      description: Принимает URL в виде обычного текста (не JSON) в теле запроса.
+      parameters:
+      - description: URL для сокращения
+        in: body
+        name: body
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.ShortenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ShortenResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Создать короткую ссылку (plain text)
+      tags:
+      - urls
+  /{id}:
+    get:
+      description: Выполняет перенаправление (HTTP 307 Temporary Redirect) на оригинальный
+        URL.
+      parameters:
+      - description: Короткий идентификатор ссылки
+        example: '"4z31jnFH"'
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "307":
+          description: Temporary Redirect на оригинальный URL
+          headers:
+            string:
+              description: Оригинальный URL"  example("https://www.amazon.com")
+              type: Location
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "410":
+          description: Gone
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Редирект по короткой ссылке
+      tags:
+      - urls
+  /api/internal/stats:
+    get:
+      description: 'Возвращает общую статистику: количество сокращённых URL и пользователей.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Статистика сервиса
+          schema:
+            properties:
+              urls:
+                type: integer
+              users:
+                type: integer
+            type: object
+        "403":
+          description: 'Доступ запрещён: запрос не из доверенной подсети'
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Получить внутреннюю статистику сервиса
+      tags:
+      - internal
+  /api/shorten:
+    post:
+      consumes:
+      - application/json
+      description: Принимает URL в формате JSON.
+      parameters:
+      - description: URL для сокращения
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.ShortenRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/api.ShortenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ShortenResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Создать короткую ссылку (JSON)
+      tags:
+      - urls
+  /api/shorten/batch:
+    post:
+      consumes:
+      - application/json
+      description: Принимает массив URL и возвращает соответствующие короткие ссылки.
+      parameters:
+      - description: Массив URL для сокращения
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/api.BatchRequestItem'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Пакет успешно обработан
+          schema:
+            items:
+              $ref: '#/definitions/api.BatchResponseItem'
+            type: array
+        "400":
+          description: Некорректный JSON, пустой массив, дубликаты correlation_id
+            или невалидные URL
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Пользователь не авторизован
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Пакетное создание коротких ссылок
+      tags:
+      - urls
+  /api/user/urls:
+    delete:
+      consumes:
+      - application/json
+      description: Помечает указанные короткие ссылки для асинхронного удаления.
+      parameters:
+      - description: Массив коротких идентификаторов для удаления
+        example: '["abc123","def456"]'
+        in: body
+        name: body
+        required: true
+        schema:
+          items:
+            type: string
+          type: array
+      produces:
+      - text/plain
+      responses:
+        "202":
+          description: Accepted - запрос на удаление принят в обработку
+        "400":
+          description: Некорректный JSON или пустой массив
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Пользователь не авторизован (нет или невалидная cookie)
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Пометить URL на удаление
+      tags:
+      - urls
+    get:
+      description: Возвращает список всех сокращённых ссылок, созданных текущим пользователем.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список URL пользователя
+          schema:
+            items:
+              $ref: '#/definitions/model.URLModel'
+            type: array
+        "204":
+          description: No Content - у пользователя нет сохранённых URL
+        "401":
+          description: Пользователь не авторизован (нет или невалидная cookie)
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: Получить все URL пользователя
+      tags:
+      - urls
+  /ping:
+    get:
+      description: Возвращает "OK", если сервер и подключение к базе данных работают
+        корректно.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "500":
+          description: db ping failed
+          schema:
+            type: string
+      summary: Проверка работоспособности сервиса
+      tags:
+      - health
+securityDefinitions:
+  ApiKeyAuth:
+    description: Cookie-based authorization
+    in: cookie
+    name: token
+    type: apiKey
+swagger: "2.0"

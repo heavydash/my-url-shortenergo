@@ -1,6 +1,6 @@
-// Package idgen предоставляет функции для генерации уникальных идентификаторов.
+// Package generator предоставляет функции для генерации уникальных идентификаторов.
 // Идентификаторы используются для создания коротких ссылок в URL shortener сервисе.
-package idgen
+package generator
 
 import (
 	"crypto/rand"
@@ -25,7 +25,7 @@ const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 //
 // Использование:
 //
-//	id, err := idgen.IDGen()
+//	id, err := generator.IDGen()
 //	if err != nil {
 //	    log.Fatalf("Failed to generate ID: %v", err)
 //	}

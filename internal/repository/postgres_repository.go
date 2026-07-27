@@ -1,10 +1,15 @@
-// Package repository предоставляет реализации хранилищ для URL shortener.
+// Package repository предоставляет реализации хранилищ для сервиса сокращения URL.
+//
+// PostgresRepository — реализация, использующая PostgreSQL с pgxpool.
+// Поддерживает транзакции, batch-операции, soft delete и оптимизированные запросы.
 package repository
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	idGen "github.com/heavydash/my-url-shortenergo/internal/generator"
+	urlGen "github.com/heavydash/my-url-shortenergo/internal/generator"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,7 +21,7 @@ import (
 )
 
 // DeleteTask представляет задачу на удаление URL (используется в worker'ах).
-// Сохраняется для обратной совместимости и возможного расширения.
+// Сохраняется для обратной совместимости и возможного расширения
 type DeleteTask struct {
 	UserID    uuid.UUID
 	ShortURLs []string
@@ -38,7 +43,6 @@ type DeleteTask struct {
 //   - Конфликт: ON CONFLICT DO NOTHING с последующим поиском
 //
 // Используется для:
-//   - Production окружений
 //   - High availability систем
 //   - Систем с большим объемом данных
 //   - Распределенных приложений
@@ -116,10 +120,25 @@ func NewPostgresRepository(pool *pgxpool.Pool, logger *zap.Logger, baseURL strin
 //	INSERT ... ON CONFLICT (original_url) DO NOTHING
 //	- При успехе: возвращает сгенерированный ID
 //	- При конфликте: возвращает ErrNoRows, выполняется SELECT для поиска существующей записи
+
 func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*model.URLModel, error) {
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
+	}
+
+	// Если ShortURL не передан, генерируем его
+	if m.ShortURL == "" {
+		shortURL, err := idGen.IDGen()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate short URL: %w", err)
+		}
+		m.ShortURL = shortURL
+	}
+
+	// Если ID не передан, генерируем новый UUID
+	if m.ID == uuid.Nil {
+		m.ID = uuid.New()
 	}
 
 	query := `
@@ -133,7 +152,10 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*mo
 	var returnedShortURL string
 
 	err := p.pool.QueryRow(ctx, query,
-		uuid.New(), m.ShortURL, m.OriginalURL, m.UserID,
+		m.ID,       // используем сгенерированный или переданный ID
+		m.ShortURL, // используем сгенерированный или переданный ShortURL
+		m.OriginalURL,
+		m.UserID,
 	).Scan(&returnedID, &returnedShortURL)
 
 	if err == nil {
@@ -145,12 +167,12 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*mo
 			zap.String("short_url", m.ShortURL),
 			zap.String("original_url", m.OriginalURL))
 
-		saved := m // создаём копию для возврата указателя
+		saved := m
 		return &saved, nil
 	}
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Конфликт ищем существующий
+		// Конфликт ищем существующую запись
 		var existing model.URLModel
 		err = p.pool.QueryRow(ctx,
 			`SELECT id, short_url, original_url, user_id, is_deleted FROM urls WHERE original_url = $1`,
@@ -159,11 +181,9 @@ func (p *PostgresRepository) SaveURL(ctx context.Context, m model.URLModel) (*mo
 			&existing.IsDeleted)
 
 		if err != nil {
-
 			p.logger.Error("Failed to lookup existing URL after conflict",
 				zap.String("original_url", m.OriginalURL),
 				zap.Error(err))
-
 			return nil, err
 		}
 
@@ -242,21 +262,28 @@ func (p *PostgresRepository) GetURL(ctx context.Context, id string) (*model.URLM
 
 // SaveBatch сохраняет несколько URL в рамках одной транзакции.
 //
-// Использует batch операции pgx для эффективной вставки.
-// Каждая запись получает новый UUID, сгенерированный приложением.
+// Выполняет:
+//  1. Проверку контекста на отмену
+//  2. Начало транзакции
+//  3. Для каждой записи в батче:
+//     - Генерацию short_url через idgen.ShortURLGen(), если он не передан
+//     - Генерацию UUID, если он не передан
+//     - Проверку на дубликаты short_url внутри батча
+//  4. Выполнение batch вставки
+//  5. Коммит транзакции
 //
 // Параметры:
 //   - ctx: контекст для cancellation/timeout транзакции
 //   - batch: слайс URLModel для сохранения
 //
 // Возвращает:
-//   - error: ошибка если транзакция не удалась
+//   - error: ошибка если транзакция не удалась или произошла ошибка генерации/вставки
 //
 // Пример использования:
 //
 //	urls := []model.URLModel{
-//	    {ShortURL: "id1", OriginalURL: "https://example1.com", UserID: userID},
-//	    {ShortURL: "id2", OriginalURL: "https://example2.com", UserID: userID},
+//	    {OriginalURL: "https://example1.com", UserID: userID},
+//	    {OriginalURL: "https://example2.com", UserID: userID},
 //	}
 //	err := repo.SaveBatch(ctx, urls)
 //	if err != nil {
@@ -265,9 +292,9 @@ func (p *PostgresRepository) GetURL(ctx context.Context, id string) (*model.URLM
 //
 // Особенности:
 //   - Использует транзакцию для атомарности
-//   - Batch размер ограничен только памятью
+//   - Генерирует уникальные short_url для каждой записи
+//   - Защищает от дубликатов внутри одного батча
 //   - При ошибке выполняется автоматический Rollback
-//   - Не проверяет уникальность (дубликаты вызовут ошибку БД)
 func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLModel) error {
 
 	if ctx.Err() != nil {
@@ -279,22 +306,64 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 		p.logger.Error("Failed to begin transaction for SaveBatch", zap.Error(err))
 		return err
 	}
+
+	committed := false
 	defer func() {
-		if tx != nil {
+		if !committed {
 			_ = tx.Rollback(ctx)
 		}
 	}()
 
 	b := &pgx.Batch{}
-	for _, m := range batch {
+	seen := make(map[string]bool) // защита от дубликатов short_url внутри батча
+
+	for i := range batch {
+		m := &batch[i]
+
+		// Генерируем ShortURL, если не передан
+		if m.ShortURL == "" {
+			for attempt := 0; attempt < 5; attempt++ {
+				shortURL, err := urlGen.ShortURLGen()
+				if err != nil {
+					p.logger.Error("Failed to generate short URL in batch", zap.Error(err))
+					return fmt.Errorf("failed to generate short URL: %w", err)
+				}
+				if !seen[shortURL] {
+					m.ShortURL = shortURL
+					seen[shortURL] = true
+					break
+				}
+			}
+		} else if seen[m.ShortURL] {
+			return fmt.Errorf("duplicate short_url in batch: %s", m.ShortURL)
+		} else {
+			seen[m.ShortURL] = true
+		}
+
+		// Генерируем UUID, если не передан
+		if m.ID == uuid.Nil {
+			m.ID = uuid.New()
+		}
+
 		b.Queue("INSERT INTO urls (id, short_url, original_url, user_id) VALUES ($1, $2, $3, $4)",
-			uuid.New(), m.ShortURL, m.OriginalURL, m.UserID)
+			m.ID, m.ShortURL, m.OriginalURL, m.UserID)
 	}
+
 	br := tx.SendBatch(ctx, b)
+
+	// Проверяем результат каждой операции в батче
+	for i := 0; i < len(batch); i++ {
+		_, err := br.Exec()
+		if err != nil {
+			p.logger.Error("Batch insert failed for item",
+				zap.Int("index", i),
+				zap.Error(err))
+			return fmt.Errorf("failed to insert item %d: %w", i, err)
+		}
+	}
+
 	if err = br.Close(); err != nil {
-
-		p.logger.Error("Failed to execute batch insert in PostgreSQL", zap.Error(err))
-
+		p.logger.Error("Failed to close batch", zap.Error(err))
 		return err
 	}
 
@@ -303,6 +372,7 @@ func (p *PostgresRepository) SaveBatch(ctx context.Context, batch []model.URLMod
 		return err
 	}
 
+	committed = true
 	p.logger.Info("Batch URLs successfully saved to PostgreSQL", zap.Int("count", len(batch)))
 	return nil
 }
@@ -368,7 +438,7 @@ func (p *PostgresRepository) Clear() error {
 	return nil
 }
 
-// GetURLsByUser возвращает все не удаленные URL принадлежащие пользователю.
+// GetURLsByUser возвращает все неудаленные URL принадлежащие пользователю.
 //
 // Выполняет SELECT с фильтрацией по user_id и is_deleted.
 // Преобразует short_url в полные URL путем конкатенации с baseURL.

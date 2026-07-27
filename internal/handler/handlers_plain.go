@@ -31,6 +31,23 @@ import (
 //   - 400 Bad Request - некорректный URL или запрос
 //   - 409 Conflict - URL уже был сокращен (возвращает существующий сокращенный URL)
 //   - 500 Internal Server Error - внутренняя ошибка сервера
+
+// ShortenPlainHandler godoc
+// @Summary      Создать короткую ссылку (plain text)
+// @Description  Принимает URL в виде обычного текста (не JSON) в теле запроса.
+//
+//	Используется для POST /
+//
+// @Tags         urls
+// @Accept       plain
+// @Produce      json
+// @Param        body  body      string  true  "URL для сокращения"  example:"https://www.google.com"
+// @Success      201  {object}  api.ShortenResponse
+// @Success      409  {object}  api.ShortenResponse
+// @Failure      400  {object}  api.ErrorResponse
+// @Failure      401  {object}  api.ErrorResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       / [post]
 func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
 	h.ShortenHandler(w, r, false)
 }
@@ -51,6 +68,18 @@ func (h *Handler) ShortenPlainHandler(w http.ResponseWriter, r *http.Request) {
 // Коды ответа:
 //   - 200 OK - успешный ответ
 //   - 405 Method Not Allowed - использован неподдерживаемый метод
+
+// HomeHandler godoc
+// @Summary      Главная страница сервиса
+// @Description  Возвращает простое информационное сообщение о сервисе.
+//
+//	Используется как приветственная страница по корневому пути "/".
+//
+// @Tags         general
+// @Produce      plain
+// @Success      200  {string}  string  "URL Shortener Service - Use POST / to shorten and GET /{id} to redirect"
+// @Failure      405  {object}  api.ErrorResponse  "Метод не разрешён (разрешён только GET)"
+// @Router       / [get]
 func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	if method := r.Method; method != http.MethodGet {
 		h.logger.Info("Method not allowed: %s", zap.String("method", method))
@@ -85,6 +114,25 @@ func (h *Handler) HomeHandler(w http.ResponseWriter, r *http.Request) {
 // Параметры:
 //   - w: http.ResponseWriter для записи ответа
 //   - r: *http.Request входящий HTTP-запрос
+
+// RedirectURL godoc
+// @Summary      Редирект по короткой ссылке
+// @Description  Выполняет перенаправление (HTTP 307 Temporary Redirect) на оригинальный URL.
+//
+//	**Важно:** При нажатии "Execute" в Swagger UI может показаться "Undocumented" или "Failed to fetch" —
+//	это нормальное поведение Swagger, потому что он не следует за редиректами.
+//	В реальном использовании переход по короткой ссылке работает корректно.
+//
+// @Tags         urls
+// @Produce      plain
+// @Param        id   path      string  true  "Короткий идентификатор ссылки"  example("4z31jnFH")
+// @Success      307  "Temporary Redirect на оригинальный URL"
+// @Header       307  Location  string  "Оригинальный URL"  example("https://www.amazon.com")
+// @Failure      400  {object}  api.ErrorResponse
+// @Failure      404  {object}  api.ErrorResponse
+// @Failure      410  {object}  api.ErrorResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       /{id} [get]
 func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("Redirect handler called", zap.String("path", r.URL.Path))
 
@@ -111,8 +159,9 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Добавляем аудит
+	userID := middleware.GetUserID(r.Context())
 	userIDstr := ""
-	if userID, ok := r.Context().Value(middleware.UserIDKey).(uuid.UUID); ok && userID != uuid.Nil {
+	if userID != uuid.Nil {
 		userIDstr = userID.String()
 	}
 	h.auditSvc.SendAsync(audit.NewFollowEvent(userIDstr, urlModel.OriginalURL))
@@ -141,6 +190,18 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 //
 //	Этот эндпоинт полезен для оркестраторов (Kubernetes, Docker Swarm)
 //	и систем мониторинга для проверки готовности сервиса.
+
+// PingHandler godoc
+// @Summary      Проверка работоспособности сервиса
+// @Description  Возвращает "OK", если сервер и подключение к базе данных работают корректно.
+//
+//	Используется для health checks в мониторинге, Kubernetes, Docker и т.д.
+//
+// @Tags         health
+// @Produce      plain
+// @Success      200  {string}  string  "OK"
+// @Failure      500  {string}  string  "db ping failed"
+// @Router       /ping [get]
 func (h *Handler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Ping(r.Context()); err != nil {
 		h.logger.Error("DB ping failed", zap.Error(err))
